@@ -371,8 +371,34 @@ class GameState:
             self.last_discard_player_index = player_index
             player.ippatsu_chance = False  # 打牌后失去一发机会
             self.game_phase = GamePhase.WAITING_FOR_RESPONSE  # 设置状态等待响应
+            self.current_player_index = (player_index + 1) % self.num_players
             action_result.update({"tile": tile_to_discard})
             # print(f"玩家 {player_index} 打出 {tile_to_discard}, 手牌: {[str(t) for t in player.hand]}") # 调试
+            self.game_phase = GamePhase.WAITING_FOR_RESPONSE
+            # 在打牌后初始化响应队列 (这里简化，实际需要按Ron/Pon/Kan/Chi优先级构建)
+            # 一个最简化的队列可能是打牌者下家、下下家、下下下家
+            discarder = player_index
+            self._response_queue = []
+            for i in range(1, self.num_players):
+                responder_index = (discarder + i) % self.num_players
+                # 实际中需要检查该玩家当前状态下是否有合法的响应动作(Chi/Pon/Kan/Ron)
+                # 如果 RulesEngine 有 is_response_possible(game_state, player_index, last_discarded_tile) 这样的方法会很有用
+                # 这里假设所有非打牌者都需要被检查
+                self._response_queue.append(responder_index)
+
+            # 将当前玩家设置为响应队列的第一个玩家
+            if self._response_queue:
+                self.current_player_index = self._response_queue[0]
+                print(f"进入响应阶段，首先检查玩家 {self.current_player_index}")
+            else:
+                # 如果响应队列为空 (例如只有1个玩家，或者规则不允许任何人响应)，直接进入下一摸牌阶段
+                print("没有玩家需要响应，直接进入下一摸牌阶段")
+                self.game_phase = GamePhase.PLAYER_DRAW  # 或HAND_OVER
+                self.current_player_index = (
+                    discarder + 1
+                ) % self.num_players  # 下一位玩家摸牌
+                self.last_discarded_tile = None  # 清理弃牌信息
+                self.last_discard_player_index = None
 
         elif action_type == ActionType.RIICHI:
             discard_tile = action.riichi_discard
@@ -650,13 +676,36 @@ class GameState:
             )
 
         elif action_type == ActionType.PASS:
-            # PASS 通常在 WAITING_FOR_RESPONSE 阶段由环境处理
-            # 如果在此处收到 PASS (例如 Agent 在自己回合选择 PASS?), 视为无效?
-            # 或者可以允许 PASS 摸切 (打出刚摸的牌)? 这取决于规则集和动作设计
-            # 暂时假设 PASS 只在响应阶段有意义，在此处收到可能表示错误或需要特殊处理
-            print(f"警告: 在非响应阶段收到玩家 {player_index} 的 PASS 动作。")
-            # 不改变状态，可能返回错误标记
-            action_result.update({"error": "PASS received outside response phase"})
+            if self.game_phase == GamePhase.WAITING_FOR_RESPONSE:
+                print(f"玩家 {player_index} 在响应阶段 PASS 了。")
+                # 从响应队列中移除当前玩家 (假设当前玩家就是 response_queue 的第一个)
+                if self._response_queue and self._response_queue[0] == player_index:
+                    self._response_queue.pop(0)  # 移除当前玩家
+
+                # 检查是否还有需要响应的玩家
+                if self._response_queue:
+                    # 轮到响应队列中的下一个玩家
+                    self.current_player_index = self._response_queue[0]
+                    print(f"转到下一个潜在响应者: 玩家 {self.current_player_index}")
+                else:
+                    # 所有需要响应的玩家都已处理完毕 (要么 PASS 了，要么执行了动作并中断了响应流程)
+                    print("所有相关玩家都已响应（PASS 或其他动作），响应阶段结束。")
+                    # 响应阶段结束，进入下一摸牌阶段 (或流局)
+                    self.game_phase = GamePhase.PLAYER_DRAW  # 或HAND_OVER
+                    self.current_player_index = (
+                        self.last_discard_player_index + 1
+                    ) % self.num_players  # 打牌者的下家摸牌
+                    print(f"下一玩家 {self.current_player_index} 摸牌。")
+                    # 清理关于最后弃牌的临时状态
+                    self.last_discarded_tile = None
+                    self.last_discard_player_index = None
+                    # 响应队列也已清空
+            else:
+                print(
+                    f"警告: 在非响应阶段 ({self.game_phase.name}) 收到玩家 {player_index} 的 PASS 动作。忽略。"
+                )
+                # 在非响应阶段收到 PASS，通常是逻辑错误，可以忽略或抛出异常
+                pass  # 忽略无效的PASS
 
         elif action_type == ActionType.SPECIAL_DRAW:
             # 特殊流局 (例如 九种九牌)
