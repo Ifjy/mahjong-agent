@@ -1,0 +1,11 @@
+training:
+  episodes: 1000
+  learning_rate: 0.001
+  gamma: 0.99
+  batch_size: 64
+  buffer_size: 10000
+  target_update_freq: 10
+
+environment:
+  name: MahjongEnv
+  max_steps: 1000
