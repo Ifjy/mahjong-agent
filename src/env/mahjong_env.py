@@ -3,7 +3,7 @@ from gym import spaces
 import numpy as np
 from typing import Dict, List, Optional
 
-from src.env.core.game_state import GameState
+from src.env.core.game_state import GameState, Wall
 from src.env.core.rules import RulesEngine
 from src.env.core.actions import Action
 from src.env.state_encoder import StateEncoder
@@ -21,8 +21,12 @@ class MahjongEnv(gym.Env):
         self.max_candidates = 100  # 最大候选动作数
 
         # 核心组件初始化
-        self.game_state = GameState(config.get("game_rule_config", {}))
+        self.wall = Wall()
         self.rules_engine = RulesEngine()
+        self.game_state = GameState(
+            config.get("game_rule_config", {}),
+        )
+
         self.state_encoder = StateEncoder(config.get("state_encoder_config", {}))
         self.renderer = Renderer(config) if config.get("render", False) else None
 

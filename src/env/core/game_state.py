@@ -1,7 +1,7 @@
 import random
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Tuple  # 引入类型提示
+from typing import List, Optional, Dict, Any, Tuple, Set  # 引入类型提示
 from .rules import RulesEngine
 
 # --- 从 actions.py 导入我们定义好的类 ---
@@ -215,7 +215,7 @@ class GameState:
     不包含复杂的控制流或规则校验逻辑。
     """
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config, wall: Wall, rules_engine: RulesEngine):
         """
         初始化游戏状态。
         Args:
@@ -231,8 +231,8 @@ class GameState:
         ]
 
         # --- 牌墙状态 ---
-        self.wall: Wall = Wall(self.config.get("game_rules"))
-
+        self.wall: Wall = wall
+        self.rules_engine: RulesEngine = rules_engine
         # --- 游戏进程状态 ---
         self.round_wind: int = 0  # 当前场风 (0=东, 1=南, ...)
         self.round_number: int = 1  # 当前局数 (1-4)
@@ -548,6 +548,7 @@ class GameState:
         Ron (any player) > Pon/Kan (any player) > Chi (next player)
         同优先级下，离打牌者逆时针方向最近的玩家优先 (即上家 > 对家 > 下家)。
         """
+        # print(f"Debug Resolve: Resolving priorities for declarations: {self._response_declarations}")
         winning_action: Optional[Action] = None
         winning_player_index: Optional[int] = None
         winning_priority = -1  # 优先级值越高越优先
@@ -555,7 +556,7 @@ class GameState:
         # 定义优先级映射 (值越大优先级越高)
         priority_map = {
             ActionType.RON: 3,
-            ActionType.KAN: 2,  # 大明杠
+            ActionType.KAN: 2,  # 大明杠声明
             ActionType.PON: 2,
             ActionType.CHI: 1,
             ActionType.PASS: 0,  # PASS 没有优先级，不会“获胜”
@@ -563,73 +564,77 @@ class GameState:
 
         discarder = self.last_discard_player_index
         if discarder is None:
-            # 不应该在有声明时发生
+            # 如果没有最后打出的牌，说明不在响应阶段，不应该调用此方法
+            print("警告: 在非响应阶段调用 _resolve_response_priorities")
             return None, None
 
-        # 构建玩家列表，按逆时针顺位离打牌者由近到远排列
-        # 打牌者下家 (discarder + 1) -> 对家 (discarder + 2) -> 上家 (discarder + 3)
-        # 需要处理玩家索引循环
-        player_order_reverse_turn = [
-            (discarder + i) % self.num_players for i in range(1, self.num_players)
-        ]  # [下家, 对家, 上家]
+        # --- 按优先级从高到低检查 ---
 
-        # 检查响应声明，先处理 Ron (最高优先级)
+        # 1. 检查 Ron (最高优先级)
         ron_declarations = {
             idx: action
             for idx, action in self._response_declarations.items()
             if action.type == ActionType.RON
         }
         if ron_declarations:
-            # 如果有 Ron 声明，按逆时针顺位选择优先级最高的 Ron 玩家
-            for (
-                player_idx
-            ) in player_order_reverse_turn:  # 这个顺序其实是顺时针，需要逆时针
-                # 逆时针顺序应该是： (discarder - 1)%N, (discarder - 2)%N, (discarder - 3)%N
-                # 或者简单点，把 player_order_reverse_turn reverse 一下就是逆时针离弃牌者由远及近
-                # 逆时针离弃牌者近的玩家 (上家) 优先级高
-                reverse_turn_player_idx = (
-                    discarder + (self.num_players - i)
-                ) % self.num_players  # i=1->上家, i=2->对家, i=3->下家
-                if reverse_turn_player_idx in ron_declarations:
-                    # 找到逆时针顺序中第一个 Ron 的玩家
+            # 如果有 Ron 声明，按逆时针顺位离打牌者由近到远检查玩家
+            # 逆时针顺序：上家 (discarder - 1), 对家 (discarder - 2), 下家 (discarder - 3)
+            for i in range(1, self.num_players):  # i = 1, 2, 3 (对于 4 玩家)
+                player_idx_reverse_turn = (discarder - i) % self.num_players
+
+                # 检查这个玩家是否声明了 Ron
+                if player_idx_reverse_turn in ron_declarations:
+                    # 找到逆时针顺序中第一个声明 Ron 的玩家，他获胜
+                    print(
+                        f"Debug Resolve: Ron declared by player {player_idx_reverse_turn} wins."
+                    )
                     return (
-                        ron_declarations[reverse_turn_player_idx],
-                        reverse_turn_player_idx,
+                        ron_declarations[player_idx_reverse_turn],
+                        player_idx_reverse_turn,
                     )
 
-        # 如果没有 Ron，检查 Pon/Kan (次高优先级)
+        # 2. 检查 Pon/Kan (次高优先级)
+        # Pon 和 Kan (大明杠) 优先级相同
         pon_kan_declarations = {
             idx: action
             for idx, action in self._response_declarations.items()
             if action.type in {ActionType.PON, ActionType.KAN}
         }
         if pon_kan_declarations:
-            # 如果有 Pon/Kan 声明，按逆时针顺位选择优先级最高的 Pon/Kan 玩家
-            for player_idx in player_order_reverse_turn:  # 再次按逆时针顺序检查
-                reverse_turn_player_idx = (
-                    discarder + (self.num_players - i)
-                ) % self.num_players
-                if reverse_turn_player_idx in pon_kan_declarations:
-                    # 找到逆时针顺序中第一个 Pon/Kan 的玩家
+            # 如果有 Pon 或 Kan 声明，按逆时针顺位离打牌者由近到远检查玩家
+            for i in range(1, self.num_players):  # i = 1, 2, 3
+                player_idx_reverse_turn = (discarder - i) % self.num_players
+
+                # 检查这个玩家是否声明了 Pon 或 Kan
+                if player_idx_reverse_turn in pon_kan_declarations:
+                    # 找到逆时针顺序中第一个声明 Pon 或 Kan 的玩家，他获胜
+                    print(
+                        f"Debug Resolve: Pon/Kan declared by player {player_idx_reverse_turn} wins."
+                    )
                     return (
-                        pon_kan_declarations[reverse_turn_player_idx],
-                        reverse_turn_player_idx,
+                        pon_kan_declarations[player_idx_reverse_turn],
+                        player_idx_reverse_turn,
                     )
 
-        # 如果没有 Ron 或 Pon/Kan，检查 Chi (最低优先级)
+        # 3. 检查 Chi (最低优先级)
         chi_declarations = {
             idx: action
             for idx, action in self._response_declarations.items()
             if action.type == ActionType.CHI
         }
         if chi_declarations:
-            # Chi 只可能来自打牌者的下家
+            # Chi 只可能来自打牌者的下家 (discarder + 1) % N
             next_player_index = (discarder + 1) % self.num_players
+            # 检查下家是否声明了 Chi
             if next_player_index in chi_declarations:
-                # 检查下家是否有 Chi 声明
+                # Chi 没有同优先级冲突 (因为只有下家能 Chi)，如果声明了且没有更高优先级动作，则 Chi 获胜
+                print(
+                    f"Debug Resolve: Chi declared by player {next_player_index} wins."
+                )
                 return chi_declarations[next_player_index], next_player_index
 
-        # 如果以上都没有获胜动作 (所有声明都是 PASS)
+        # 如果以上所有优先级动作都没有获胜 (所有声明的动作都是 PASS)
+        print("Debug Resolve: No winning non-PASS action declared.")
         return None, None  # 返回 None 表示没有获胜动作
 
     def _apply_winning_response(
