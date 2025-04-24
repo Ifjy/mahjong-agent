@@ -15,7 +15,7 @@ import itertools  # 可能用于组合生成
 # from .game_state import GamePhase, PlayerState, GameState, Meld # GamePhase, PlayerState, GameState, Meld 已在 game_state.py 定义
 # 使用相对导入（如果文件结构支持）
 from .actions import Action, ActionType, Tile, KanType
-from .game_state import GamePhase, PlayerState, GameState, Meld
+from .game_state import GamePhase, PlayerState, Meld, Wall, GameState
 
 
 class RulesEngine:
