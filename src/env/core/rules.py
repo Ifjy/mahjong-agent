@@ -505,30 +505,146 @@ class RulesEngine:
     # ======================================================================
     # == 核心规则：和牌检查与听牌检查 (占位符 - 需要完整实现!) ==
     # ======================================================================
+    def _find_standard_melds(
+        self, tile_counts: TypingCounter[int], melds_to_find: int
+    ) -> bool:
+        """
+        递归辅助函数：检查给定的牌值计数是否能组成指定数量的面子 (刻子或顺子)。
+
+        Args:
+            tile_counts (TypingCounter[int]): 按牌值 (0-33) 统计的牌数量。
+                                             注意：这里不区分赤牌，只关心牌的数值。
+            melds_to_find (int): 需要找到的面子数量。
+
+        Returns:
+            bool: 如果可以组成指定数量的面子，则返回 True，否则返回 False。
+        """
+        # 基本情况 1: 成功找到所有面子
+        if melds_to_find == 0:
+            # 如果所有牌都用完了，说明成功分解
+            return not tile_counts or sum(tile_counts.values()) == 0
+
+        # 基本情况 2: 牌不够组成剩余面子 (剪枝优化)
+        if sum(tile_counts.values()) < melds_to_find * 3:
+            return False
+
+        # 获取当前计数中最小的牌值进行尝试 (保证处理顺序，避免重复)
+        # 如果 tile_counts 为空，min 会报错，但理论上会被 melds_to_find == 0 或 牌不够的检查拦截
+        try:
+            min_val = min(tile_counts.keys())
+        except ValueError:
+            # 如果 tile_counts 为空但 melds_to_find > 0, 意味着牌用完了但面子没找够
+            return False
+
+        # 尝试移除一个刻子 (三个 min_val)
+        if tile_counts[min_val] >= 3:
+            # 创建一个副本进行修改
+            next_counts = tile_counts.copy()
+            next_counts[min_val] -= 3
+            # 如果该牌值数量变为0，从 Counter 中移除键
+            if next_counts[min_val] == 0:
+                del next_counts[min_val]
+            # 递归调用，需要找的面子数减一
+            if self._find_standard_melds(next_counts, melds_to_find - 1):
+                return True  # 如果这条路成功了，直接返回 True
+
+        # 尝试移除一个顺子 (min_val, min_val + 1, min_val + 2)
+        # 检查条件：1. 不能是字牌 2. 不能是 8 或 9 开头 (会超出同花色范围)
+        is_number_tile = min_val < 27
+        can_form_sequence = is_number_tile and (min_val % 9 <= 6)
+
+        if (
+            can_form_sequence
+            and tile_counts[min_val + 1] > 0
+            and tile_counts[min_val + 2] > 0
+        ):
+            # 创建一个副本进行修改
+            next_counts = tile_counts.copy()
+            next_counts[min_val] -= 1
+            next_counts[min_val + 1] -= 1
+            next_counts[min_val + 2] -= 1
+
+            # 如果牌值数量变为0，则移除键
+            if next_counts[min_val] == 0:
+                del next_counts[min_val]
+            if next_counts[min_val + 1] == 0:
+                del next_counts[min_val + 1]
+            if next_counts[min_val + 2] == 0:
+                del next_counts[min_val + 2]
+
+            # 递归调用，需要找的面子数减一
+            if self._find_standard_melds(next_counts, melds_to_find - 1):
+                return True  # 如果这条路成功了，直接返回 True
+
+        # 如果以 min_val 开头的刻子和顺子都无法成功构成剩余面子，则这条路失败
+        return False
 
     def check_win(self, hand_tiles: List[Tile], melds: List[Meld]) -> bool:
         """
-        检查给定的手牌和副露组合是否构成和牌型。
-        (占位符 - 这是最复杂的部分之一, 需要专门的算法)
-        """
-        # --- 必要检查 ---
-        total_tiles = len(hand_tiles) + sum(len(m["tiles"]) for m in melds)
-        if total_tiles != 14:
-            return False  # 和牌必须是14张
+        检查给定的手牌和副露组合是否构成和牌型 (标准型、七对子、国士无双)。
 
-        # --- 特殊牌型检查 ---
-        if self._is_seven_pairs_raw(hand_tiles, melds):
-            return True
-        if self._is_kokushi_raw(hand_tiles, melds):
-            return True
+        Args:
+            hand_tiles (List[Tile]): 玩家的隐藏手牌列表 (可能包含刚摸到/荣和的牌)。
+                                      对于门清听牌检查，这里是13张。
+                                      对于和牌检查，这里包含和牌的那张，总共应构成14张牌（加上副露）。
+            melds (List[Meld]): 玩家已公开的副露列表。
+
+        Returns:
+            bool: 如果构成和牌型，返回 True，否则返回 False。
+        """
+        all_tiles_in_hand = hand_tiles + [
+            tile for meld in melds for tile in meld["tiles"]
+        ]
+        total_tile_count = len(all_tiles_in_hand)
+
+        # --- 基本检查：和牌必须是14张牌 ---
+        if total_tile_count != 14:
+            # print(f"Debug check_win: 牌数 {total_tile_count} 不等于 14，无法和牌。")
+            return False
+
+        # --- 特殊牌型检查 (仅在门清时可能) ---
+        is_menzen = not melds  # 是否门清
+        if is_menzen:
+            # 检查国士无双 (需要 14 张手牌)
+            if self._is_kokushi_raw(hand_tiles, melds):
+                # print("Debug check_win: 检测到国士无双")
+                return True
+            # 检查七对子 (需要 14 张手牌，考虑赤牌)
+            if self._is_seven_pairs_raw(hand_tiles, melds):
+                # print("Debug check_win: 检测到七对子")
+                return True
 
         # --- 标准牌型检查 (4面子 + 1雀头) ---
-        # 需要一个高效的算法来分解手牌
-        # TBD: 实现标准型检查 _is_standard_hand_recursive
-        if self._is_standard_hand_recursive(hand_tiles, melds):
-            return True
+        # 使用 Counter 按牌值统计所有14张牌的数量 (忽略赤牌进行结构检查)
+        # 注意：Meld 中的牌也需要包含进来统计
+        all_tile_values = [tile.value for tile in all_tiles_in_hand]
+        value_counts: TypingCounter[int] = Counter(all_tile_values)
 
-        return False  # 无法组成任何和牌型
+        # 尝试将每个出现次数 >= 2 的牌值作为雀头 (对子)
+        for pair_value in list(
+            value_counts.keys()
+        ):  # 使用 list 避免在迭代中修改 counter
+            if value_counts[pair_value] >= 2:
+                # 1. 复制当前的牌值计数
+                remaining_counts = value_counts.copy()
+
+                # 2. 从计数中移除雀头 (两张)
+                remaining_counts[pair_value] -= 2
+                if remaining_counts[pair_value] == 0:
+                    del remaining_counts[pair_value]  # 移除数量为0的键
+
+                # 3. 计算还需要组成多少个面子 (总共4个)
+                melds_needed = 4
+
+                # 4. 调用递归函数检查剩余的牌是否能组成所需数量的面子
+                # print(f"Debug check_win: 尝试以 {pair_value} 作为雀头, 检查剩余牌: {remaining_counts}, 需要面子: {melds_needed}")
+                if self._find_standard_melds(remaining_counts, melds_needed):
+                    # print(f"Debug check_win: 成功找到以 {pair_value} 为雀头的标准和牌型")
+                    return True  # 如果找到一种合法的分解方式，则手牌有效
+
+        # 如果尝试了所有可能的雀头都无法构成 4 面子，则不是标准和牌型
+        # print("Debug check_win: 未找到有效的标准和牌分解")
+        return False
 
     def _is_standard_hand_recursive(
         self, hand_tiles: List[Tile], melds: List[Meld]
@@ -539,57 +655,80 @@ class RulesEngine:
         return False
 
     def _is_seven_pairs_raw(self, hand_tiles: List[Tile], melds: List[Meld]) -> bool:
-        """(占位符) 检查七对子"""
+        """检查七对子 (考虑赤牌)"""
         if melds:
             return False
         if len(hand_tiles) != 14:
             return False
-        # 使用 Counter 统计 Tile 对象 (区分赤牌)
-        counts: TypingCounter[Tile] = Counter(hand_tiles)
-        # 检查是否有超过4张的牌 (理论上七对子不可能，但作为校验)
-        if any(c > 2 for c in counts.values()):
-            return False
-        # 检查是否正好是7个对子
+        counts: TypingCounter[Tile] = Counter(
+            hand_tiles
+        )  # 使用 Tile 对象计数，区分赤牌
+        # 七对子必须正好有7种不同的牌，且每种牌恰好有2张
         return len(counts) == 7 and all(c == 2 for c in counts.values())
 
     def _is_kokushi_raw(self, hand_tiles: List[Tile], melds: List[Meld]) -> bool:
-        """(占位符) 检查国士无双"""
+        """检查国士无双 (十三幺)"""
         if melds:
             return False
         if len(hand_tiles) != 14:
             return False
 
+        # 国士无双必须包含所有13种幺九牌，其中一种是 对子
         hand_values = {t.value for t in hand_tiles}
-        counts = Counter(t.value for t in hand_tiles)
+        counts = Counter(t.value for t in hand_tiles)  # 按牌值计数
 
-        # 必须包含所有13种幺九牌
+        # 检查是否包含所有幺九牌
         if not self.terminal_honor_values.issubset(hand_values):
             return False
-        # 必须有且仅有一个幺九牌是对子，其他都是单张
+
+        # 检查是否只有一个对子，其他都是单张
         pair_count = 0
         single_count = 0
-        for term_val in self.terminal_honor_values:
-            if counts[term_val] == 2:
-                pair_count += 1
-            elif counts[term_val] == 1:
-                single_count += 1
-            else:  # 必须是1或2张
-                return False
+        has_non_terminal = False
+        for val, count in counts.items():
+            if val in self.terminal_honor_values:
+                if count == 2:
+                    pair_count += 1
+                elif count == 1:
+                    single_count += 1
+                else:  # 幺九牌数量不能 > 2 或 < 1
+                    return False
+            else:  # 不能包含非幺九牌
+                has_non_terminal = True
+                break  # 提前退出
 
+        if has_non_terminal:
+            return False
+
+        # 必须是1个对子 + 12个单张幺九牌
         return pair_count == 1 and single_count == 12
 
     def is_tenpai(self, hand_tiles: List[Tile], melds: List[Meld]) -> bool:
         """检查给定的13张牌组合是否听牌"""
-        if len(hand_tiles) + sum(len(m["tiles"]) for m in melds) != 13:
+        current_tiles_count = len(hand_tiles) + sum(len(m["tiles"]) for m in melds)
+        if current_tiles_count != 13:
+            # print(f"Debug is_tenpai: 牌数 {current_tiles_count} 不等于 13，无法判断听牌。")
             return False  # 听牌检查基于13张牌
 
         # 尝试加入所有可能的牌 (0-33)，看是否能和牌
-        for potential_tile_value in range(34):
-            # 假设用非赤牌测试 (通常足够判断是否听牌)
+        possible_tile_values = set(range(34))  # 所有基础牌值
+
+        # 优化：如果手牌+副露中某种牌已经有4张，则不可能再摸到第5张来和牌
+        all_current_tiles = hand_tiles + [t for m in melds for t in m["tiles"]]
+        current_value_counts = Counter(t.value for t in all_current_tiles)
+        for val, count in current_value_counts.items():
+            if count >= 4:
+                possible_tile_values.discard(val)  # 移除不可能摸到的牌
+
+        for potential_tile_value in possible_tile_values:
+            # 假设用非赤牌测试 (通常足够判断是否听牌结构)
             test_tile = Tile(value=potential_tile_value, is_red=False)
+            # 使用 check_win 判断加入这张牌后是否和牌
             if self.check_win(hand_tiles + [test_tile], melds):
+                # print(f"Debug is_tenpai: 加入 {test_tile} 可和牌，判定为听牌。")
                 return True  # 只要有一种牌能和，就是听牌
 
+        # print("Debug is_tenpai: 尝试所有可能牌后均无法和牌，判定为未听牌。")
         return False
 
     def is_hand_over(self, game_state) -> bool:
@@ -838,6 +977,165 @@ class RulesEngine:
                 count += 1
         return count
 
+    def _get_win_context(
+        self,
+        winner_player: PlayerState,
+        game_state: GameState,
+        is_tsumo: bool,
+        win_tile: Tile,
+        loser_index: Optional[int],
+    ) -> Dict:
+        """
+        (辅助) 收集和牌时调用 calculate_yaku_and_score 所需的上下文信息。
+        """
+        # 假设 PlayerState 有 seat_wind, player_id, riichi_declared, ippatsu_chance, is_menzen 属性
+        # 假设 GameState 有 round_wind, dealer_index, honba, riichi_sticks, wall, num_players 属性
+        # 假设 Wall 有 dora_indicators, ura_dora_indicators, get_remaining_live_tiles_count 方法
+
+        context = {
+            "player_id": winner_player.player_id,  # 和牌者 ID
+            "is_tsumo": is_tsumo,
+            "is_ron": not is_tsumo,
+            "is_riichi": winner_player.riichi_declared,
+            "is_ippatsu": winner_player.ippatsu_chance,  # 需要环境在立直后的第一巡正确设置
+            "is_menzen": winner_player.is_menzen,
+            "player_wind": winner_player.seat_wind,  # 玩家的自风
+            "round_wind": game_state.round_wind,  # 场风
+            "dora_indicators": list(game_state.wall.dora_indicators),  # 当前宝牌指示牌
+            "ura_dora_indicators": (  # 里宝牌指示牌 (仅立直和牌时有效)
+                list(game_state.wall.ura_dora_indicators)
+                if winner_player.riichi_declared
+                else []
+            ),
+            "is_dealer": game_state.dealer_index == winner_player.player_id,  # 是否庄家
+            "honba": game_state.honba,  # 本场数
+            "riichi_sticks": game_state.riichi_sticks,  # 立直棒数量
+            "win_tile": win_tile,  # 和了的牌
+            "turn_number": game_state.turn_number,  # 当前巡目
+            "wall_remaining": game_state.wall.get_remaining_live_tiles_count(),  # 剩余牌墙数
+            "num_players": game_state.num_players,  # 玩家数量
+            "dealer_id": game_state.dealer_index,  # 庄家 ID
+            "loser_id": loser_index,  # 放铳者 ID (仅荣和时)
+            # --- 以下是更详细的役种判断可能需要的上下文 ---
+            # "is_haitei": game_state.wall.get_remaining_live_tiles_count() == 0 and is_tsumo, # 海底摸月
+            # "is_houtei": game_state.wall.get_remaining_live_tiles_count() == 0 and not is_tsumo, # 河底捞鱼
+            # "is_rinshan": winner_player.just_kaned_for_rinshan, # 玩家状态中需要标记是否刚杠完准备摸岭上牌
+            # "is_chankan": game_state.last_action_info.get("type") == ActionType.KAN.name and game_state.last_action_info.get("kan_type") == KanType.ADDED, # 是否抢杠和 (需要环境在处理Ron时检查是否抢的加杠)
+        }
+        # 添加关于海底/河底/岭上/抢杠的更精确判断逻辑 (需要 GameState 或 last_action_info 提供更多信息)
+        if game_state.wall.get_remaining_live_tiles_count() == 0:
+            context["is_haitei"] = is_tsumo
+            context["is_houtei"] = not is_tsumo
+        # 'is_rinshan' 和 'is_chankan' 的判断比较复杂，需要依赖 GameState 中更详细的状态记录
+        # 示例性添加，实际需要环境正确维护这些状态
+        context.setdefault("is_rinshan", False)  # 假设 PlayerState 有标记
+        context.setdefault(
+            "is_chankan", False
+        )  # 假设 GameState/last_action_info 能判断
+
+        return context
+
+    def calculate_yaku_and_score(
+        self,
+        hand_tiles_final: List[Tile],
+        melds: List[Meld],
+        win_tile: Tile,
+        context: Dict,
+    ) -> Dict:
+        """
+        计算和牌的役种、翻数、符数和最终得分。
+        (临时占位符/简化实现 - 后续替换为完整逻辑)
+        """
+        print(
+            f"警告: 调用 calculate_yaku_and_score (简化版) - 玩家 {context.get('player_id')}"
+        )
+        # --- 临时简化逻辑 ---
+        han = 1  # 保证至少一番
+        fu = 30  # 假设 30 符
+        yaku_list = [("临时役", 1)]
+        score_base = 1000  # 假设基础分 1000
+
+        if context.get("is_riichi"):
+            yaku_list.append(("立直", 1))
+            han += 1
+        if context.get("is_tsumo") and context.get("is_menzen"):
+            yaku_list.append(("门前清自摸和", 1))
+            han += 1
+            fu = 20  # 自摸平和形
+
+        # 模拟宝牌
+        dora_han = 0
+        # ... (此处可以加入简化/占位的宝牌计算) ...
+        # if dora_han > 0:
+        #    yaku_list.append((f"宝牌 {dora_han}", dora_han))
+        #    han += dora_han
+
+        # 根据 han 和 fu 粗略计算 base_points (非常简化)
+        if han >= 5:
+            score_base = 2000  # 满贯
+        elif han == 4:
+            score_base = 1300 if fu == 30 else 2000
+        elif han == 3:
+            score_base = 700 if fu == 30 else 1000
+        elif han == 2:
+            score_base = 400 if fu == 30 else 500
+        elif han == 1:
+            score_base = 300  # 最低
+
+        # 计算支付 (极度简化)
+        score_payments = defaultdict(int)
+        total_gain = 0
+        honba_bonus = context.get("honba", 0) * 300
+        riichi_sticks_bonus = context.get("riichi_sticks", 0) * 1000
+        num_players = context.get("num_players", 4)
+        winner_id = context.get("player_id")
+        dealer_id = context.get("dealer_id")
+        is_dealer_win = winner_id == dealer_id
+
+        if context.get("is_tsumo"):
+            # 粗略自摸支付
+            for i in range(num_players):
+                if i == winner_id:
+                    continue
+                is_player_dealer = i == dealer_id
+                payment = 0
+                if is_dealer_win:  # 庄家自摸，子家支付
+                    payment = (
+                        (score_base * 2 + 99) // 100
+                    ) * 100 + honba_bonus // num_players * 100
+                else:  # 子家自摸
+                    if is_player_dealer:  # 庄家支付的部分
+                        payment = (
+                            (score_base * 2 + 99) // 100
+                        ) * 100 + honba_bonus // num_players * 100
+                    else:  # 其他子家支付的部分
+                        payment = (
+                            (score_base + 99) // 100
+                        ) * 100 + honba_bonus // num_players * 100
+                score_payments[i] -= payment
+                total_gain += payment
+        else:  # 荣和
+            loser_id = context.get("loser_id")
+            if loser_id is not None:
+                payment = 0
+                if is_dealer_win:  # 庄家荣和
+                    payment = ((score_base * 6 + 99) // 100) * 100 + honba_bonus
+                else:  # 子家荣和
+                    payment = ((score_base * 4 + 99) // 100) * 100 + honba_bonus
+                score_payments[loser_id] -= payment
+                total_gain += payment
+
+        score_payments[winner_id] += total_gain + riichi_sticks_bonus
+
+        return {
+            "yaku": yaku_list,
+            "han": han,
+            "fu": fu,
+            "score_base": score_base,
+            "score_payments": dict(score_payments),  # 转回普通 dict
+            "error": None,
+        }
+
     def get_hand_outcome(self, game_state: "GameState") -> Dict[str, Any]:
         """
         确定并返回本局游戏的结果（和牌、流局等）的详细信息。
@@ -847,111 +1145,236 @@ class RulesEngine:
             game_state: 当前游戏状态 (处于一局结束的状态)。
 
         Returns:
-            Dict[str, Any]: 包含本局结果信息的字典。关键字段包括：
-            - "end_type": str ("TSUMO", "RON", "EXHAUSTIVE_DRAW", "NINE_TILES_DRAW", ...)
-            - "winner_index": Optional[int] # 和牌玩家索引
-            - "loser_index": Optional[int] # 放铳玩家索引 (仅 RON)
-            - "winning_tile": Optional[Tile] # 和牌的牌 (对于和牌)
-            - "draw_type": Optional[str] # 流局类型 (对于流局)
-            - "tenpai_players": Optional[List[int]] # 听牌玩家索引列表 (对于流局)
-            - "noten_players": Optional[List[int]] # 未听牌玩家索引列表 (对于流局)
-            - "score_details": Optional[Dict] # 包含计算点数所需信息的字典 (如番数、符、役列表、是否役满、宝牌数量等)
+            Dict[str, Any]: 包含本局结果信息的字典。
         """
         outcome: Dict[str, Any] = {
-            "end_type": "UNKNOWN",
-            "winner_index": None,
-            "loser_index": None,
-            "winning_tile": None,
-            "draw_type": None,
-            "tenpai_players": None,
-            "noten_players": None,
-            "score_details": None,  # 用于存放番、符、役等信息
+            "end_type": "UNKNOWN",  # 结束类型: "TSUMO", "RON", "EXHAUSTIVE_DRAW", "SPECIAL_DRAW", "SCORING_ERROR"
+            "winner_index": None,  # 和牌玩家索引 (和牌时)
+            "winners": [],  # 和牌玩家索引列表 (可能有多家和牌，例如多重荣和，但日麻通常只取一个)
+            "loser_index": None,  # 放铳玩家索引 (仅 RON 时)
+            "winning_tile": None,  # 和牌的牌 (和牌时)
+            "draw_type": None,  # 流局类型 (流局时)
+            "tenpai_players": [],  # 听牌玩家索引列表 (流局时)
+            "noten_players": [],  # 未听牌玩家索引列表 (流局时)
+            "score_details": None,  # 包含计算点数所需信息的字典 (番/符/役/支付等)
+            "score_changes": defaultdict(int),  # 记录每个玩家最终分数变化的字典
         }
 
-        # --- 根据游戏结束时的状态或导致结束的最后动作来判断结果类型 ---
-
-        # 通常，导致结束的动作或事件信息会保存在 game_state.last_action_info 中
+        # --- 检查是否由玩家动作导致结束 (和牌, 特殊流局声明) ---
+        # **关键假设**: GameState.last_action_info 存储了导致结束的那个动作的信息
+        # 例如: {'type': ActionType.TSUMO, 'player': 1, 'tile': Tile(...)}
+        # 例如: {'type': ActionType.RON, 'player': 2, 'tile': Tile(...), 'loser_index': 0}
+        # 例如: {'type': ActionType.SPECIAL_DRAW, 'player': 0, 'reason': '九种九牌'}
         last_action_info = game_state.last_action_info
-        if last_action_info:
-            action_type = last_action_info.get("type")  # 假设类型存储为字符串名
-            player_index = last_action_info.get("player")  # 执行最后动作的玩家
 
-            if action_type == ActionType.TSUMO.name:
+        player_action_ended_hand = False
+        if last_action_info:
+            action_type_str = last_action_info.get(
+                "type"
+            )  # 假设类型存储为 ActionType 枚举或其 .name
+            player_index = last_action_info.get("player")
+            tile = last_action_info.get("tile")
+
+            # 将 action_type_str 转回 ActionType 枚举比较 (如果需要)
+            action_type = None
+            if isinstance(action_type_str, ActionType):
+                action_type = action_type_str
+            elif isinstance(action_type_str, str):
+                try:
+                    action_type = ActionType[action_type_str]  # 尝试从名称恢复枚举
+                except KeyError:
+                    pass  # 无法识别的动作名称
+
+            if action_type == ActionType.TSUMO:
                 outcome["end_type"] = "TSUMO"
                 outcome["winner_index"] = player_index
-                outcome["winning_tile"] = last_action_info.get(
-                    "tile"
-                )  # 假设摸到的和牌在 info 中
+                outcome["winners"].append(player_index)
+                outcome["winning_tile"] = tile
+                player_action_ended_hand = True
 
-                # TODO: 计算自摸和牌的番、符和役
-                # 需要分析 game_state.players[player_index] 的手牌和副露
-                # 调用辅助方法计算役、番、符、宝牌等
-                # outcome["score_details"] = self._calculate_win_details(game_state, player_index, is_tsumo=True)
-
-            elif action_type == ActionType.RON.name:
+            elif action_type == ActionType.RON:
                 outcome["end_type"] = "RON"
                 outcome["winner_index"] = player_index
-                # 需要确保 Ron 动作的 last_action_info 中包含了放铳玩家的信息
-                outcome["loser_index"] = last_action_info.get(
-                    "loser_index"
-                )  # 假设 Ron 动作 info 中有放铳者索引
-                outcome["winning_tile"] = last_action_info.get(
-                    "tile"
-                )  # 假设荣和的牌在 info 中
+                outcome["winners"].append(player_index)
+                # **重要**: 必须能从 last_action_info 获取放铳者信息
+                outcome["loser_index"] = last_action_info.get("loser_index")
+                outcome["winning_tile"] = tile
+                if outcome["loser_index"] is None:
+                    print(
+                        f"警告: Ron 动作信息缺少 loser_index for player {player_index}"
+                    )
+                    outcome["end_type"] = "SCORING_ERROR"  # 数据不完整，无法计分
+                player_action_ended_hand = True
 
-                # TODO: 计算荣和的番、符和役
-                # 需要分析和牌玩家的手牌和副露，并考虑放铳者
-                # outcome["score_details"] = self._calculate_win_details(game_state, player_index, is_tsumo=False, ron_player_index=outcome["loser_index"])
+            elif action_type == ActionType.SPECIAL_DRAW:
+                outcome["end_type"] = "SPECIAL_DRAW"
+                outcome["draw_type"] = last_action_info.get(
+                    "reason", "特殊流局"
+                )  # 例如 '九种九牌'
+                # 通常特殊流局只增加本场数，无点数移动 (除非规则特殊)
+                outcome["score_details"] = {
+                    "yaku": [(outcome["draw_type"], 0)],
+                    "han": 0,
+                    "fu": 0,
+                    "score_base": 0,
+                    "score_payments": {},
+                }
+                player_action_ended_hand = True
+                # 注意: 四杠散了, 四风连打, 四家立直 可能需要在这里或 RulesEngine 其他地方检查并设置
 
-            # TODO: 处理特殊流局类型 (九种九牌, 四风连打, 四杠散了, 四家立直)
-            # 这些通常是通过玩家声明某个动作 (如九种九牌的特殊动作) 或在 RulesEngine 的其他方法中判断到并设置 GameState 标志
-            # 如果 GameState 有相应的标志，这里根据标志判断
-            # if game_state.nine_tiles_declared:
-            #     outcome["end_type"] = "SPECIAL_DRAW"
-            #     outcome["draw_type"] = "九种九牌"
-            #     # TODO: 处理特殊流局的得分 (通常是流局满贯或不流局)
-
-            # if game_state.four_wind_declared: # 假设四风连打有标记
-            #     outcome["end_type"] = "SPECIAL_DRAW"
-            #     outcome["draw_type"] = "四风连打"
-            # ... 处理其他特殊流局 ...
-
-        # 如果不是通过和牌或特殊声明结束的，检查是否是牌墙摸完导致的流局
-        # 这通常发生在游戏阶段变为 HAND_OVER_SCORES 但 end_type 仍为 UNKNOWN 时
-        if outcome["end_type"] == "UNKNOWN":
-            # 假设此时是牌墙摸完流局 (流局满贯等判断可能在 calculate_hand_scores 中)
-            outcome["end_type"] = "EXHAUSTIVE_DRAW"
-            outcome["draw_type"] = "牌墙摸完"
-
-            # TODO: 判断每个玩家是否听牌 (Tenpai)
-            # 需要 RulesEngine 提供方法检查一个玩家的手牌是否听牌
-            # tenpai_status = self._check_tenpai_status(game_state) # 假设返回 {player_index: is_tenpai}
-            # outcome["tenpai_players"] = [idx for idx, is_t in tenpai_status.items() if is_t]
-            # outcome["noten_players"] = [idx for idx, is_t in tenpai_status.items() if not is_t]
-            # TODO: 流局时的得分处理 (听牌者收取未听牌者的点数)
-
-        # TODO: 如果 outcome["score_details"] 为 None 且 end_type 是和牌，调用详细计算番符役的方法
-        if outcome["end_type"] in {"TSUMO", "RON"} and outcome["score_details"] is None:
-            try:
-                # 调用辅助方法计算番、符、役、宝牌等详细信息
-                score_details = self._calculate_win_details(
-                    game_state,
-                    outcome["winner_index"],
-                    outcome["end_type"] == "TSUMO",
-                    outcome["loser_index"],
+        # --- 如果不是玩家动作结束，检查是否牌墙摸完流局 ---
+        if not player_action_ended_hand:
+            # 假设牌墙摸完时，get_remaining_live_tiles_count() == 0
+            # 并且没有发生和牌或特殊流局声明
+            if game_state.wall.get_remaining_live_tiles_count() == 0:
+                outcome["end_type"] = "EXHAUSTIVE_DRAW"
+                outcome["draw_type"] = "荒牌流局 (牌墙摸完)"
+            else:
+                # 如果到这里，既没有玩家动作结束，牌墙也没完，说明状态可能不一致
+                print(
+                    f"警告: get_hand_outcome 无法确定结束类型。剩余牌: {game_state.wall.get_remaining_live_tiles_count()}, 最后动作: {last_action_info}"
                 )
-                outcome["score_details"] = score_details
-                outcome["yaku"] = score_details.get("yaku")
-                outcome["han"] = score_details.get("total_han")
-                outcome["fu"] = score_details.get("fu")
-                outcome["is_yakuman"] = score_details.get("is_yakuman", False)
-            except Exception as e:
-                print(f"错误: 计算玩家 {outcome['winner_index']} 和牌详情时出错: {e}")
-                # 如果计算出错，可以标记为流局或特殊错误状态
-                outcome["end_type"] = "SCORING_ERROR"
-                outcome["score_details"] = {"error": str(e)}
+                outcome["end_type"] = "UNKNOWN"  # 保持未知状态
+                return outcome  # 提前返回，信息不足
 
-        print(f"RulesEngine Debug: Determined Hand Outcome: {outcome}")
+        # --- 计算得分和状态 ---
+        if outcome["end_type"] in ["TSUMO", "RON"]:
+            winner = game_state.players[outcome["winner_index"]]
+            # 和牌时的最终手牌 (隐藏牌 + 和了的那张牌)
+            # 假设和牌动作发生后，和的那张牌在 winner.hand 或 winner.drawn_tile 里
+            # 这里需要明确：check_win/calculate_yaku 需要14张牌。
+            # 假设在执行和牌动作时，环境已经将和牌加入winner.hand
+            # 或者，如果自摸，和牌是 winner.drawn_tile
+            final_hand_tiles = list(winner.hand)
+            if (
+                outcome["end_type"] == "TSUMO"
+                and outcome["winning_tile"] not in final_hand_tiles
+            ):
+                # 如果自摸牌不在手牌里（例如刚摸到还没合并），加进去
+                # 需要确保 winning_tile 是正确的 Tile 对象实例
+                # 再次检查以避免重复添加
+                if outcome["winning_tile"]:
+                    # 检查是否真的需要添加 (可能环境逻辑已处理)
+                    temp_hand_count = len(final_hand_tiles) + sum(
+                        len(m["tiles"]) for m in winner.melds
+                    )
+                    if temp_hand_count == 13:  # 如果当前刚好13张，说明和牌需要加入
+                        final_hand_tiles.append(outcome["winning_tile"])
+                    elif temp_hand_count != 14:
+                        print(
+                            f"警告: 和牌时玩家 {winner.player_id} 牌数异常 ({temp_hand_count}张)"
+                        )
+
+            elif (
+                outcome["end_type"] == "RON"
+                and outcome["winning_tile"] not in final_hand_tiles
+            ):
+                # 荣和牌理应在构成 check_win 通过的 14 张牌组合里
+                # 可能需要从 game_state.last_discarded_tile 获取正确的实例?
+                # 假设调用 get_hand_outcome 时 winner.hand 已经是和牌状态的14张(含副露)
+                # 或者，如果环境没有更新手牌，我们手动添加
+                temp_hand_count = len(final_hand_tiles) + sum(
+                    len(m["tiles"]) for m in winner.melds
+                )
+                if temp_hand_count == 13 and outcome["winning_tile"]:
+                    final_hand_tiles.append(outcome["winning_tile"])
+                elif temp_hand_count != 14:
+                    print(
+                        f"警告: 和牌时玩家 {winner.player_id} 牌数异常 ({temp_hand_count}张)"
+                    )
+
+            # 准备上下文并计算得分
+            win_context = self._get_win_context(
+                winner_player=winner,
+                game_state=game_state,
+                is_tsumo=(outcome["end_type"] == "TSUMO"),
+                win_tile=outcome["winning_tile"],
+                loser_index=outcome["loser_index"],
+            )
+            try:
+                # *** 调用计分函数 ***
+                score_calc_result = self.calculate_yaku_and_score(
+                    hand_tiles_final=final_hand_tiles,  # 传递最终的14张牌
+                    melds=winner.melds,
+                    win_tile=outcome["winning_tile"],
+                    context=win_context,
+                )
+                if score_calc_result.get("error"):
+                    print(f"计分错误: {score_calc_result['error']}")
+                    outcome["end_type"] = "SCORING_ERROR"
+                    outcome["score_details"] = score_calc_result
+                else:
+                    outcome["score_details"] = score_calc_result
+                    # 将计算出的分数变化累加到 outcome["score_changes"]
+                    payments = score_calc_result.get("score_payments", {})
+                    for p_idx, change in payments.items():
+                        outcome["score_changes"][p_idx] += change
+
+            except Exception as e:
+                print(f"严重错误: 调用 calculate_yaku_and_score 时发生异常: {e}")
+                import traceback
+
+                traceback.print_exc()
+                outcome["end_type"] = "SCORING_ERROR"
+                outcome["score_details"] = {"error": f"计算异常: {e}"}
+
+        elif outcome["end_type"] == "EXHAUSTIVE_DRAW":
+            # 荒牌流局，计算听牌罚点 (No-ten Bappu)
+            tenpai_indices = []
+            noten_indices = []
+            for i, player in enumerate(game_state.players):
+                # 调用 is_tenpai 检查听牌状态
+                if self.is_tenpai(player.hand, player.melds):
+                    tenpai_indices.append(i)
+                else:
+                    noten_indices.append(i)
+
+            outcome["tenpai_players"] = tenpai_indices
+            outcome["noten_players"] = noten_indices
+
+            # 计算罚点支付 (标准规则: 共3000点)
+            num_tenpai = len(tenpai_indices)
+            num_noten = len(noten_indices)
+            bappu_payments = defaultdict(int)
+
+            if (
+                0 < num_tenpai < game_state.num_players
+            ):  # 只有在有人听牌且有人没听牌时才支付
+                points_per_noten = 3000 // num_noten
+                points_per_tenpai = 3000 // num_tenpai
+
+                for idx in noten_indices:
+                    bappu_payments[idx] -= points_per_noten
+                for idx in tenpai_indices:
+                    bappu_payments[idx] += points_per_tenpai
+
+            # 将罚点累加到最终分数变化
+            for p_idx, change in bappu_payments.items():
+                outcome["score_changes"][p_idx] += change
+
+            outcome["score_details"] = {
+                "yaku": [("荒牌流局", 0)],
+                "han": 0,
+                "fu": 0,
+                "score_base": 0,
+                "score_payments": dict(bappu_payments),  # 记录罚点支付情况
+            }
+
+        elif outcome["end_type"] == "SPECIAL_DRAW":
+            # 特殊流局通常无点数变化，只处理本场和立直棒（这部分应在更新GameState时处理）
+            # score_changes 保持默认的 0
+            if outcome["score_details"] is None:  # 如果前面没有设置
+                outcome["score_details"] = {
+                    "yaku": [(outcome["draw_type"], 0)],
+                    "han": 0,
+                    "fu": 0,
+                    "score_base": 0,
+                    "score_payments": {},
+                }
+
+        # print(f"RulesEngine Debug: Determined Hand Outcome: {outcome}")
+        # 将 defaultdict 转为普通 dict，方便序列化或打印
+        outcome["score_changes"] = dict(outcome["score_changes"])
         return outcome
 
     # TODO: 实现 _is_furiten (振听检查)
