@@ -375,24 +375,43 @@ class GameState:
                 player = self.players[player_index]
                 tile_to_discard = action.tile  # 要打出的具体牌
 
-                # TODO: 更详细的打牌合法性验证 (是否在手牌，是否符合立直/振听规则等)
-                # 可以在 RulesEngine 中实现 can_discard 方法并在 env.step 检查
-                # 暂时假设这里的 tile_to_discard 是合法的
-
-                # 从手牌或摸到的牌中移除打出的牌
-                if (
+                # --- 验证打出的牌是否合法 ---
+                # 检查要打出的牌是摸到的牌，还是手牌中的牌
+                is_discarding_drawn_tile = (
                     player.drawn_tile is not None
                     and tile_to_discard == player.drawn_tile
-                ):
-                    player.drawn_tile = None
-                elif tile_to_discard in player.hand:
-                    # 需要注意赤宝牌的处理，确保移除的是 action.tile 指定的那张牌对象
-                    player.hand.remove(tile_to_discard)
-                else:
+                )
+                is_discarding_from_hand = tile_to_discard in player.hand
+
+                if not (is_discarding_drawn_tile or is_discarding_from_hand):
                     print(
-                        f"错误: 玩家 {player_index} 尝试打出不在手牌或摸到的牌 {tile_to_discard}。忽略。"
+                        f"错误: 玩家 {player_index} 尝试打出不在手牌或摸到的牌 {tile_to_discard}。忽略此动作。"
                     )
-                    return  # 无效打牌
+                    # TODO: 根据需要返回一个表示动作无效的标记或抛出异常
+                    return  # 无效打牌，终止 apply_action
+
+                # --- 根据打出的牌来源执行不同的移除操作 ---
+                if is_discarding_drawn_tile:
+                    # 情况 1: 打出摸到的牌 (摸切)
+                    print(f"玩家 {player_index} 摸切 {tile_to_discard}")
+                    player.drawn_tile = None  # 清除摸到的牌槽位
+                    # 手牌 player.hand 保持不变 (13张)
+
+                elif is_discarding_from_hand:
+                    # 情况 2: 打出手牌中的牌 (手切)
+                    print(f"玩家 {player_index} 手切 {tile_to_discard}")
+                    # 先将摸到的牌加入手牌，然后清除摸到的牌槽位
+                    if player.drawn_tile is not None:
+                        player.hand.append(player.drawn_tile)
+                        player.drawn_tile = None
+                    # else: 如果 drawn_tile 已经是 None，说明玩家之前没有摸牌（如杠后立即打牌），
+                    # 这种情况下不将 drawn_tile 加入手牌，只从手牌移除要打出的牌。
+
+                    # 从手牌中移除被打出的那张牌
+                    # 使用辅助方法 _remove_tiles_from_hand 来处理精确移除 (包括赤宝牌)
+                    self._remove_tiles_from_hand(
+                        player, [tile_to_discard]
+                    )  # 将要移除的牌作为列表传递
 
                 # 将打出的牌加入牌河，记录最后打牌信息
                 player.discards.append(tile_to_discard)

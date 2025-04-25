@@ -245,8 +245,8 @@ class RulesEngine:
         processed_kakan_values = set()  # 防止对同一种牌值的碰重复生成加杠动作
 
         for meld in player.melds:
-            if meld.type == ActionType.PON:
-                pon_tile_value = meld.tiles[0].value  # 碰的牌值
+            if meld["type"] == ActionType.PON:
+                pon_tile_value = meld["tiles"][0].value  # 碰的牌值
                 if pon_tile_value in processed_kakan_values:
                     continue
 
@@ -678,7 +678,7 @@ class RulesEngine:
         # 检查宝牌
         dora_han = 0
         all_tiles_in_hand_and_melds = hand_tiles_final + [
-            t for meld in melds for t in meldm["tiles"]
+            t for meld in melds for t in meld["tiles"]
         ]
         dora_indicators = context.get("dora_indicators", [])
         ura_indicators = context.get("ura_dora_indicators", [])  # ura只在立直时有效
@@ -837,6 +837,122 @@ class RulesEngine:
             if tile_val == dora_val:
                 count += 1
         return count
+
+    def get_hand_outcome(self, game_state: "GameState") -> Dict[str, Any]:
+        """
+        确定并返回本局游戏的结果（和牌、流局等）的详细信息。
+        这个方法在 is_hand_over 返回 True 后调用，GameState 应该处于本局结束时的状态。
+
+        Args:
+            game_state: 当前游戏状态 (处于一局结束的状态)。
+
+        Returns:
+            Dict[str, Any]: 包含本局结果信息的字典。关键字段包括：
+            - "end_type": str ("TSUMO", "RON", "EXHAUSTIVE_DRAW", "NINE_TILES_DRAW", ...)
+            - "winner_index": Optional[int] # 和牌玩家索引
+            - "loser_index": Optional[int] # 放铳玩家索引 (仅 RON)
+            - "winning_tile": Optional[Tile] # 和牌的牌 (对于和牌)
+            - "draw_type": Optional[str] # 流局类型 (对于流局)
+            - "tenpai_players": Optional[List[int]] # 听牌玩家索引列表 (对于流局)
+            - "noten_players": Optional[List[int]] # 未听牌玩家索引列表 (对于流局)
+            - "score_details": Optional[Dict] # 包含计算点数所需信息的字典 (如番数、符、役列表、是否役满、宝牌数量等)
+        """
+        outcome: Dict[str, Any] = {
+            "end_type": "UNKNOWN",
+            "winner_index": None,
+            "loser_index": None,
+            "winning_tile": None,
+            "draw_type": None,
+            "tenpai_players": None,
+            "noten_players": None,
+            "score_details": None,  # 用于存放番、符、役等信息
+        }
+
+        # --- 根据游戏结束时的状态或导致结束的最后动作来判断结果类型 ---
+
+        # 通常，导致结束的动作或事件信息会保存在 game_state.last_action_info 中
+        last_action_info = game_state.last_action_info
+        if last_action_info:
+            action_type = last_action_info.get("type")  # 假设类型存储为字符串名
+            player_index = last_action_info.get("player")  # 执行最后动作的玩家
+
+            if action_type == ActionType.TSUMO.name:
+                outcome["end_type"] = "TSUMO"
+                outcome["winner_index"] = player_index
+                outcome["winning_tile"] = last_action_info.get(
+                    "tile"
+                )  # 假设摸到的和牌在 info 中
+
+                # TODO: 计算自摸和牌的番、符和役
+                # 需要分析 game_state.players[player_index] 的手牌和副露
+                # 调用辅助方法计算役、番、符、宝牌等
+                # outcome["score_details"] = self._calculate_win_details(game_state, player_index, is_tsumo=True)
+
+            elif action_type == ActionType.RON.name:
+                outcome["end_type"] = "RON"
+                outcome["winner_index"] = player_index
+                # 需要确保 Ron 动作的 last_action_info 中包含了放铳玩家的信息
+                outcome["loser_index"] = last_action_info.get(
+                    "loser_index"
+                )  # 假设 Ron 动作 info 中有放铳者索引
+                outcome["winning_tile"] = last_action_info.get(
+                    "tile"
+                )  # 假设荣和的牌在 info 中
+
+                # TODO: 计算荣和的番、符和役
+                # 需要分析和牌玩家的手牌和副露，并考虑放铳者
+                # outcome["score_details"] = self._calculate_win_details(game_state, player_index, is_tsumo=False, ron_player_index=outcome["loser_index"])
+
+            # TODO: 处理特殊流局类型 (九种九牌, 四风连打, 四杠散了, 四家立直)
+            # 这些通常是通过玩家声明某个动作 (如九种九牌的特殊动作) 或在 RulesEngine 的其他方法中判断到并设置 GameState 标志
+            # 如果 GameState 有相应的标志，这里根据标志判断
+            # if game_state.nine_tiles_declared:
+            #     outcome["end_type"] = "SPECIAL_DRAW"
+            #     outcome["draw_type"] = "九种九牌"
+            #     # TODO: 处理特殊流局的得分 (通常是流局满贯或不流局)
+
+            # if game_state.four_wind_declared: # 假设四风连打有标记
+            #     outcome["end_type"] = "SPECIAL_DRAW"
+            #     outcome["draw_type"] = "四风连打"
+            # ... 处理其他特殊流局 ...
+
+        # 如果不是通过和牌或特殊声明结束的，检查是否是牌墙摸完导致的流局
+        # 这通常发生在游戏阶段变为 HAND_OVER_SCORES 但 end_type 仍为 UNKNOWN 时
+        if outcome["end_type"] == "UNKNOWN":
+            # 假设此时是牌墙摸完流局 (流局满贯等判断可能在 calculate_hand_scores 中)
+            outcome["end_type"] = "EXHAUSTIVE_DRAW"
+            outcome["draw_type"] = "牌墙摸完"
+
+            # TODO: 判断每个玩家是否听牌 (Tenpai)
+            # 需要 RulesEngine 提供方法检查一个玩家的手牌是否听牌
+            # tenpai_status = self._check_tenpai_status(game_state) # 假设返回 {player_index: is_tenpai}
+            # outcome["tenpai_players"] = [idx for idx, is_t in tenpai_status.items() if is_t]
+            # outcome["noten_players"] = [idx for idx, is_t in tenpai_status.items() if not is_t]
+            # TODO: 流局时的得分处理 (听牌者收取未听牌者的点数)
+
+        # TODO: 如果 outcome["score_details"] 为 None 且 end_type 是和牌，调用详细计算番符役的方法
+        if outcome["end_type"] in {"TSUMO", "RON"} and outcome["score_details"] is None:
+            try:
+                # 调用辅助方法计算番、符、役、宝牌等详细信息
+                score_details = self._calculate_win_details(
+                    game_state,
+                    outcome["winner_index"],
+                    outcome["end_type"] == "TSUMO",
+                    outcome["loser_index"],
+                )
+                outcome["score_details"] = score_details
+                outcome["yaku"] = score_details.get("yaku")
+                outcome["han"] = score_details.get("total_han")
+                outcome["fu"] = score_details.get("fu")
+                outcome["is_yakuman"] = score_details.get("is_yakuman", False)
+            except Exception as e:
+                print(f"错误: 计算玩家 {outcome['winner_index']} 和牌详情时出错: {e}")
+                # 如果计算出错，可以标记为流局或特殊错误状态
+                outcome["end_type"] = "SCORING_ERROR"
+                outcome["score_details"] = {"error": str(e)}
+
+        print(f"RulesEngine Debug: Determined Hand Outcome: {outcome}")
+        return outcome
 
     # TODO: 实现 _is_furiten (振听检查)
     # def _is_furiten(...) -> bool: ...

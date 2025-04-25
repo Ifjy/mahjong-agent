@@ -3,7 +3,7 @@ from gym import spaces
 import numpy as np
 from typing import Dict, List, Optional
 
-from src.env.core.game_state import GameState, Wall
+from src.env.core.game_state import GameState, Wall, GamePhase
 from src.env.core.rules import RulesEngine
 from src.env.core.actions import Action
 from src.env.state_encoder import StateEncoder
@@ -85,8 +85,80 @@ class MahjongEnv(gym.Env):
 
         # 终止判断
         terminated = self.rules_engine.is_hand_over(self.game_state)
+        # --- 检查一局游戏是否结束 ---
+        hand_is_over = self.rules_engine.is_hand_over(
+            self.game_state
+        )  # 判断是否和牌或流局
 
-        return observation, reward, terminated, False, info
+        # 整场游戏是否结束的标志，默认不是
+        game_is_over = False
+
+        if hand_is_over:
+            # --- 处理一局游戏结束后的结算流程 ---
+            print("\n--- 一局游戏结束 ---")
+            self.game_state.game_phase = GamePhase.HAND_OVER_SCORES  # 切换阶段到结算
+
+            # TODO: 获取本局游戏结果的详细信息 (和牌类型、番数、符、点数变动、流局类型等)
+            # 需要 RulesEngine 提供一个方法，例如 get_hand_outcome
+            hand_outcome_info = self.rules_engine.get_hand_outcome(
+                self.game_state
+            )  # 假设 RulesEngine 有此方法
+
+            # TODO: 根据本局结果计算玩家点数变动
+            # 需要 RulesEngine 提供方法计算点数变化列表 {player_index: score_change}
+            score_changes = self.rules_engine.calculate_hand_scores(
+                self.game_state, hand_outcome_info
+            )  # 假设 RulesEngine 有此方法
+
+            # TODO: 应用点数变动到玩家分数
+            # 需要 GameState 提供方法更新玩家分数
+            self.game_state.update_scores(score_changes)  # 假设 GameState 有此方法
+
+            # TODO: 根据本局结果确定下一局的场风、局数、本场数、立直棒和庄家
+            # 需要 RulesEngine 提供方法确定下一局的状态信息
+            next_hand_state_info = self.rules_engine.determine_next_hand_state(
+                self.game_state, hand_outcome_info
+            )  # 假设 RulesEngine 有此方法
+
+            # TODO: 在 GameState 中应用下一局的状态
+            # 需要 GameState 提供方法更新 round_wind, round_number, honba, riichi_sticks, dealer_index
+            self.game_state.apply_next_hand_state(
+                next_hand_state_info
+            )  # 假设 GameState 有此方法
+            self.game_state.game_phase = (
+                GamePhase.ROUND_END
+            )  # 标记本局结束，准备进入下一局设置
+
+            # --- 检查整场游戏是否结束 ---
+            # 根据游戏规则判断是否达到整场游戏结束条件 (例如打完南四局，点数飞了等)
+            game_is_over = self.rules_engine.is_game_over(
+                self.game_state
+            )  # 假设 RulesEngine 有此方法判断整场游戏结束
+
+            terminated = game_is_over  # Episode 在整场游戏结束时终止
+
+            # 返回的状态信息反映的是局刚结束结算后的状态
+            # 训练循环在 terminated 为 False 时会调用 env.reset() 来开始下一局
+
+            print(f"--- 本局结束。整场游戏是否结束: {game_is_over} ---")
+            # 返回值中的 terminated 标志现在表示的是整场游戏的结束
+
+            return observation, reward, terminated, False, info
+
+        else:  # 一局游戏未结束，继续进行
+            terminated = False  # 整场游戏当然也未结束
+            return observation, reward, terminated, False, info
+
+    # TODO: 需要在 GameState 中添加用于追踪整场游戏状态的属性，例如
+    # game_state.round_wind (场风，如东、南)
+    # game_state.round_number (局数，如东1局、东2局)
+    # game_state.honba (本场数)
+    # game_state.riichi_sticks (场上立直棒数量)
+    # game_state.dealer_index (当前庄家索引)
+    # 这些属性需要在 game_state.reset_new_hand 中根据下一局的状态信息进行设置
+
+    # TODO: GameState 需要提供 update_scores(score_changes) 和 apply_next_hand_state(next_hand_state_info) 方法
+    # TODO: RulesEngine 需要提供 get_hand_outcome(game_state), calculate_hand_scores(game_state, outcome), determine_next_hand_state(game_state, outcome), is_game_over(game_state) 等方法
 
     def _get_observation(self):
         """获取编码后的观察状态，包含候选动作信息"""

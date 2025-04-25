@@ -91,7 +91,7 @@ def main():
         env.render()
 
         # 小延迟方便观察
-        time.sleep(1)
+        time.sleep(0.2)
 
     print("\n对局结束!")
     print(f"总奖励: {total_reward}")
