@@ -2,7 +2,7 @@ import random
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple, Set  # 引入类型提示
-from .rules import RulesEngine
+
 
 # --- 从 actions.py 导入我们定义好的类 ---
 # 假设 actions.py 与 game_state.py 在同一目录下或已正确配置路径
@@ -215,7 +215,9 @@ class GameState:
     不包含复杂的控制流或规则校验逻辑。
     """
 
-    def __init__(self, config, wall: Wall, rules_engine: RulesEngine):
+    rules_engine: "RulesEngine" = field(init=False)
+
+    def __init__(self, config, wall: Wall, rules_engine: "RulesEngine"):
         """
         初始化游戏状态。
         Args:
@@ -232,7 +234,7 @@ class GameState:
 
         # --- 牌墙状态 ---
         self.wall: Wall = wall
-        self.rules_engine: RulesEngine = rules_engine
+        self.rules_engine: "RulesEngine" = rules_engine
         # --- 游戏进程状态 ---
         self.round_wind: int = 0  # 当前场风 (0=东, 1=南, ...)
         self.round_number: int = 1  # 当前局数 (1-4)
@@ -256,11 +258,7 @@ class GameState:
         # 记录已经完成响应声明的玩家索引集合
         _responded_to_current_discard: Set[int] = field(default_factory=set)
         # ---------------------------------------
-
         num_players: int = 4  # 玩家数量
-
-        # 将 RulesEngine 实例作为 GameState 的依赖注入
-
         self._hand_over_flag: bool = False  # 内部标记: 当前局是否结束?
         self._game_over_flag: bool = False  # 内部标记: 整场游戏是否结束?
         self.turn_number: int = 0  # 当前局的巡目数
@@ -757,21 +755,49 @@ class GameState:
         else:
             next_drawer_index = (original_discarder_index + 1) % self.num_players
 
-        # TODO: 检查牌墙是否还有牌可摸 (需要 Wall 实例)
-        # if self.wall.get_remaining_live_tiles_count() > 0:
-        #      self.game_phase = GamePhase.PLAYER_DRAW
-        #      self.current_player_index = next_drawer_index
-        #      print(f"轮到玩家 {self.current_player_index} 摸牌。")
-        # else:
-        #      # 牌墙摸完，流局
-        #      self.game_phase = GamePhase.HAND_OVER_SCORES # 或专门的流局阶段
-        #      self.current_player_index = -1 # 没有当前玩家
-        #      print("牌墙摸完，流局！")
+        # 你需要在 GameState 中有 Wall 实例的引用，例如 self.wall
+        # 并确保 Wall 类有 draw_tile() 和 get_remaining_live_tiles_count() 方法
+        if self.wall.get_remaining_live_tiles_count() > 0:
+            drawn_tile = self.wall.draw_tile()  # 从牌墙摸牌
 
-        # 简化处理：假设总能摸牌
-        self.game_phase = GamePhase.PLAYER_DRAW
-        self.current_player_index = next_drawer_index
-        print(f"轮到玩家 {self.current_player_index} 摸牌。")
+            if drawn_tile:
+                player = self.players[next_drawer_index]
+                player.drawn_tile = drawn_tile  # 将摸到的牌赋给玩家的 drawn_tile 属性
+
+                # TODO: 如果需要记录摸牌动作信息，可以在这里更新 self.last_action_info
+                # 例如: self.last_action_info = {"type": "DRAW", "player": next_drawer_index, "tile": drawn_tile}
+
+                # --- 设置游戏阶段为 PLAYER_DISCARD ---
+                # 摸牌后直接进入打牌阶段
+                self.game_phase = GamePhase.PLAYER_DISCARD
+                self.current_player_index = next_drawer_index  # 当前玩家是摸牌者
+
+                print(
+                    f"玩家 {self.current_player_index} 摸到 {drawn_tile}，轮到其打牌。"
+                )
+
+                # TODO: 摸牌后立即检查自摸 (TSUMO) 或暗杠/加杠 (KAN) 的可能性。
+                # RulesEngine 在 PLAYER_DISCARD 阶段生成动作时会包含这些选项。
+                # 所以这里只需要设置好阶段，让 RulesEngine 去生成即可。
+
+            else:
+                # 从牌墙摸牌返回 None，表示牌墙已空 (理论上 get_remaining_live_tiles_count 应该先判断到)
+                print("警告: 尝试摸牌但 Wall.draw_tile 返回 None。")
+                # 转入流局处理
+                self._handle_exhaustive_draw()  # Helper method for exhaustive draw
+
+        else:
+            # 牌墙已空，无法摸牌，进入流局
+            print("牌墙已空，无法摸牌，流局！")
+            self._handle_exhaustive_draw()  # Helper method for exhaustive draw
+
+    # TODO: 添加一个辅助方法 _handle_exhaustive_draw 来处理牌墙摸完后的流局逻辑
+    def _handle_exhaustive_draw(self):
+        """处理牌墙摸完后的流局情况。"""
+        print("牌墙摸完，流局！")
+        self.game_phase = GamePhase.HAND_OVER_SCORES  # 或者一个专门表示流局的阶段
+        self.current_player_index = -1  # 没有当前行动玩家
+        # TODO: 实现流局时的得分计算和状态清理
 
     def _remove_tiles_from_hand(self, player, tiles_to_remove: List[Tile]):
         """

@@ -24,7 +24,7 @@ class MahjongEnv(gym.Env):
         self.wall = Wall()
         self.rules_engine = RulesEngine()
         self.game_state = GameState(
-            config.get("game_rule_config", {}),
+            config.get("game_rule_config", {}), self.wall, self.rules_engine
         )
 
         self.state_encoder = StateEncoder(config.get("state_encoder_config", {}))

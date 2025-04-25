@@ -512,7 +512,7 @@ class RulesEngine:
         (占位符 - 这是最复杂的部分之一, 需要专门的算法)
         """
         # --- 必要检查 ---
-        total_tiles = len(hand_tiles) + sum(len(m.tiles) for m in melds)
+        total_tiles = len(hand_tiles) + sum(len(m["tiles"]) for m in melds)
         if total_tiles != 14:
             return False  # 和牌必须是14张
 
@@ -580,7 +580,7 @@ class RulesEngine:
 
     def is_tenpai(self, hand_tiles: List[Tile], melds: List[Meld]) -> bool:
         """检查给定的13张牌组合是否听牌"""
-        if len(hand_tiles) + sum(len(m.tiles) for m in melds) != 13:
+        if len(hand_tiles) + sum(len(m["tiles"]) for m in melds) != 13:
             return False  # 听牌检查基于13张牌
 
         # 尝试加入所有可能的牌 (0-33)，看是否能和牌
@@ -678,7 +678,7 @@ class RulesEngine:
         # 检查宝牌
         dora_han = 0
         all_tiles_in_hand_and_melds = hand_tiles_final + [
-            t for meld in melds for t in meld.tiles
+            t for meld in melds for t in meldm["tiles"]
         ]
         dora_indicators = context.get("dora_indicators", [])
         ura_indicators = context.get("ura_dora_indicators", [])  # ura只在立直时有效
