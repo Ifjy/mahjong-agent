@@ -84,11 +84,8 @@ class MahjongEnv(gym.Env):
         reward = self._calculate_reward()
 
         # 终止判断
-        terminated = self.rules_engine.is_hand_over(self.game_state)
-        # --- 检查一局游戏是否结束 ---
-        hand_is_over = self.rules_engine.is_hand_over(
-            self.game_state
-        )  # 判断是否和牌或流局
+        hand_is_over = self.rules_engine.is_hand_over(self.game_state)
+        terminated = hand_is_over  # Episode 在一局游戏结束时终止
 
         # 整场游戏是否结束的标志，默认不是
         game_is_over = False

@@ -4,6 +4,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Any,
     Counter as TypingCounter,
 )  # 引入类型提示
 from collections import Counter, defaultdict  # 引入 Counter 和 defaultdict
@@ -749,6 +750,12 @@ class RulesEngine:
 
         return False
 
+    def is_game_over(self, game_state) -> bool:
+        """
+        判断当前牌局是否结束。
+        即是否到达条件 如 某位玩家点数被清空 获 南四 或东四等
+        """
+
     # ======================================================================
     # == 计分、役种、符数相关 (占位符/简化实现) ==
     # ======================================================================
@@ -1036,105 +1043,96 @@ class RulesEngine:
         return context
 
     def calculate_yaku_and_score(
-        self,
-        hand_tiles_final: List[Tile],
-        melds: List[Meld],
-        win_tile: Tile,
-        context: Dict,
-    ) -> Dict:
-        """
-        计算和牌的役种、翻数、符数和最终得分。
-        (临时占位符/简化实现 - 后续替换为完整逻辑)
-        """
-        print(
-            f"警告: 调用 calculate_yaku_and_score (简化版) - 玩家 {context.get('player_id')}"
-        )
-        # --- 临时简化逻辑 ---
-        han = 1  # 保证至少一番
-        fu = 30  # 假设 30 符
-        yaku_list = [("临时役", 1)]
-        score_base = 1000  # 假设基础分 1000
+    self,
+    game_state,
+    hand_outcome: Dict,
+) -> Dict:
+    """
+    计算和牌的役种、翻数、符数和最终得分。基于 hand_outcome 返回。
+    """
 
-        if context.get("is_riichi"):
-            yaku_list.append(("立直", 1))
-            han += 1
-        if context.get("is_tsumo") and context.get("is_menzen"):
-            yaku_list.append(("门前清自摸和", 1))
-            han += 1
-            fu = 20  # 自摸平和形
+    winner_id = hand_outcome["winner_id"]
+    loser_id = hand_outcome.get("loser_id")  # 自摸时为 None
+    hand_tiles_final = hand_outcome["hand_tiles_final"]
+    melds = hand_outcome["melds"]
+    win_tile = hand_outcome["win_tile"]
+    is_menzen = hand_outcome["is_menzen"]
+    is_riichi = hand_outcome["is_riichi"]
+    is_tsumo = hand_outcome["win_type"] == "tsumo"
+    honba = hand_outcome.get("honba", 0)
+    riichi_sticks = hand_outcome.get("riichi_sticks", 0)
+    dealer_id = hand_outcome["dealer_id"]
+    num_players = hand_outcome["num_players"]
 
-        # 模拟宝牌
-        dora_han = 0
-        # ... (此处可以加入简化/占位的宝牌计算) ...
-        # if dora_han > 0:
-        #    yaku_list.append((f"宝牌 {dora_han}", dora_han))
-        #    han += dora_han
+    # 简化版役种识别
+    han = 1
+    fu = 30
+    yaku_list = [("临时役", 1)]
 
-        # 根据 han 和 fu 粗略计算 base_points (非常简化)
-        if han >= 5:
-            score_base = 2000  # 满贯
-        elif han == 4:
-            score_base = 1300 if fu == 30 else 2000
-        elif han == 3:
-            score_base = 700 if fu == 30 else 1000
-        elif han == 2:
-            score_base = 400 if fu == 30 else 500
-        elif han == 1:
-            score_base = 300  # 最低
+    if is_riichi:
+        yaku_list.append(("立直", 1))
+        han += 1
+    if is_tsumo and is_menzen:
+        yaku_list.append(("门前清自摸和", 1))
+        han += 1
+        fu = 20
 
-        # 计算支付 (极度简化)
-        score_payments = defaultdict(int)
-        total_gain = 0
-        honba_bonus = context.get("honba", 0) * 300
-        riichi_sticks_bonus = context.get("riichi_sticks", 0) * 1000
-        num_players = context.get("num_players", 4)
-        winner_id = context.get("player_id")
-        dealer_id = context.get("dealer_id")
-        is_dealer_win = winner_id == dealer_id
+    # 宝牌计算（可以补充）
+    # dora_han = ...
 
-        if context.get("is_tsumo"):
-            # 粗略自摸支付
-            for i in range(num_players):
-                if i == winner_id:
-                    continue
-                is_player_dealer = i == dealer_id
-                payment = 0
-                if is_dealer_win:  # 庄家自摸，子家支付
-                    payment = (
-                        (score_base * 2 + 99) // 100
-                    ) * 100 + honba_bonus // num_players * 100
-                else:  # 子家自摸
-                    if is_player_dealer:  # 庄家支付的部分
-                        payment = (
-                            (score_base * 2 + 99) // 100
-                        ) * 100 + honba_bonus // num_players * 100
-                    else:  # 其他子家支付的部分
-                        payment = (
-                            (score_base + 99) // 100
-                        ) * 100 + honba_bonus // num_players * 100
-                score_payments[i] -= payment
-                total_gain += payment
-        else:  # 荣和
-            loser_id = context.get("loser_id")
-            if loser_id is not None:
-                payment = 0
-                if is_dealer_win:  # 庄家荣和
-                    payment = ((score_base * 6 + 99) // 100) * 100 + honba_bonus
-                else:  # 子家荣和
-                    payment = ((score_base * 4 + 99) // 100) * 100 + honba_bonus
-                score_payments[loser_id] -= payment
-                total_gain += payment
+    # 基础得点
+    if han >= 5:
+        score_base = 2000
+    elif han == 4:
+        score_base = 1300 if fu == 30 else 2000
+    elif han == 3:
+        score_base = 700 if fu == 30 else 1000
+    elif han == 2:
+        score_base = 400 if fu == 30 else 500
+    else:
+        score_base = 300
 
-        score_payments[winner_id] += total_gain + riichi_sticks_bonus
+    # 支付计算
+    score_payments = defaultdict(int)
+    total_gain = 0
+    is_dealer_win = (winner_id == dealer_id)
+    honba_bonus = honba * 300
+    riichi_bonus = riichi_sticks * 1000
 
-        return {
-            "yaku": yaku_list,
-            "han": han,
-            "fu": fu,
-            "score_base": score_base,
-            "score_payments": dict(score_payments),  # 转回普通 dict
-            "error": None,
-        }
+    if is_tsumo:
+        for pid in range(num_players):
+            if pid == winner_id:
+                continue
+            is_pid_dealer = (pid == dealer_id)
+            if is_dealer_win:
+                payment = ((score_base * 2 + 99) // 100) * 100 + honba_bonus // num_players
+            else:
+                if is_pid_dealer:
+                    payment = ((score_base * 2 + 99) // 100) * 100 + honba_bonus // num_players
+                else:
+                    payment = ((score_base + 99) // 100) * 100 + honba_bonus // num_players
+            score_payments[pid] -= payment
+            total_gain += payment
+    else:
+        if loser_id is not None:
+            if is_dealer_win:
+                payment = ((score_base * 6 + 99) // 100) * 100 + honba_bonus
+            else:
+                payment = ((score_base * 4 + 99) // 100) * 100 + honba_bonus
+            score_payments[loser_id] -= payment
+            total_gain += payment
+
+    score_payments[winner_id] += total_gain + riichi_bonus
+
+    return {
+        "yaku": yaku_list,
+        "han": han,
+        "fu": fu,
+        "score_base": score_base,
+        "score_payments": dict(score_payments),
+        "error": None,
+    }
+
 
     def get_hand_outcome(self, game_state: "GameState") -> Dict[str, Any]:
         """
@@ -1158,6 +1156,7 @@ class RulesEngine:
             "noten_players": [],  # 未听牌玩家索引列表 (流局时)
             "score_details": None,  # 包含计算点数所需信息的字典 (番/符/役/支付等)
             "score_changes": defaultdict(int),  # 记录每个玩家最终分数变化的字典
+            "error": None,  # 错误信息 (如果有)
         }
 
         # --- 检查是否由玩家动作导致结束 (和牌, 特殊流局声明) ---
@@ -1183,7 +1182,9 @@ class RulesEngine:
                 try:
                     action_type = ActionType[action_type_str]  # 尝试从名称恢复枚举
                 except KeyError:
-                    pass  # 无法识别的动作名称
+                    if action_type is None:
+                        outcome["end_type"] = "UNKNOWN"
+                        return outcome  # 无法识别的动作名称
 
             if action_type == ActionType.TSUMO:
                 outcome["end_type"] = "TSUMO"
@@ -1204,6 +1205,7 @@ class RulesEngine:
                         f"警告: Ron 动作信息缺少 loser_index for player {player_index}"
                     )
                     outcome["end_type"] = "SCORING_ERROR"  # 数据不完整，无法计分
+                    outcome["error"] = "缺少放铳者索引 (loser_index)"
                 player_action_ended_hand = True
 
             elif action_type == ActionType.SPECIAL_DRAW:
@@ -1264,6 +1266,8 @@ class RulesEngine:
                         print(
                             f"警告: 和牌时玩家 {winner.player_id} 牌数异常 ({temp_hand_count}张)"
                         )
+                        outcome["end_type"] = "牌数异常"
+                        return outcome
 
             elif (
                 outcome["end_type"] == "RON"
