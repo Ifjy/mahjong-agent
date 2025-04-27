@@ -103,7 +103,7 @@ class MahjongEnv(gym.Env):
 
             # TODO: 根据本局结果计算玩家点数变动
             # 需要 RulesEngine 提供方法计算点数变化列表 {player_index: score_change}
-            score_changes = self.rules_engine.calculate_hand_scores(
+            score_changes = self.rules_engine.calculate_yaku_and_score(
                 self.game_state, hand_outcome_info
             )  # 假设 RulesEngine 有此方法
 

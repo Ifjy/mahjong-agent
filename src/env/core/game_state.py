@@ -445,7 +445,224 @@ class GameState:
                     # 如果响应队列为空 (没有玩家有任何合法响应)，直接进入下一摸牌阶段
                     print("没有玩家可以响应，直接进入下一摸牌阶段。")
                     self._transition_to_next_draw_phase()  # 使用 helper 方法处理阶段转换
+                    # 3. 处理 TSUMO (自摸) 动作
+            elif action.type == ActionType.TSUMO:
+                # --- 验证 ---
+                # 检查当前手牌 (手牌 + 摸到的牌) 是否构成和牌
+                win_info = self.check_win_condition(
+                    player, is_tsumo=True
+                )  # 检查是否满足和牌条件
+                if win_info:
+                    print(f"玩家 {player_index} 宣布 Tsumo! 和牌: {player.drawn_tile}")
+                    # --- 执行 ---
+                    self.winning_tile = player.drawn_tile  # 和牌可以是摸到的牌
+                    if not self.winning_tile:
+                        # 这种情况意味着在杠后和牌 (岭上开花)，此时 drawn_tile 可能已被杠消耗
+                        # 需要从上下文中确定实际的和牌张 (很可能是摸到的岭上牌)
+                        # 假设 check_win_condition 在 win_info 中提供了和牌张
+                        self.winning_tile = win_info.get(
+                            "winning_tile", None
+                        )  # 从和牌详情中获取
+                        if not self.winning_tile:
+                            print("错误: 宣布自摸但在杠后无法确定和牌张。")
+                            # 处理错误 - 无效状态或逻辑问题
+                            return
 
+                    # --- 更新游戏状态 ---
+                    self.winner_index = player_index  # 记录和牌玩家
+                    self.is_tsumo_win = True  # 标记为自摸和牌
+                    # 转换到计分阶段
+                    self._transition_to_scoring(
+                        winner_index=player_index,
+                        winning_tile=self.winning_tile,
+                        is_tsumo=True,
+                        win_info=win_info,  # 传递计分详情
+                    )
+                else:
+                    print(
+                        f"错误: 玩家 {player_index} 尝试宣布 Tsumo 但手牌不满足和牌条件。"
+                    )
+                    # TODO: 返回无效动作信号 / 抛出错误
+                    return  # 无效自摸
+
+            # 4. 处理 KAN (杠) 动作 (暗杠或加杠)
+            elif (
+                action.type == ActionType.KAN_CLOSED
+                or action.type == ActionType.KAN_ADDED
+            ):
+                tile_to_kan = action.tile  # 组成杠的牌 (暗杠是四张之一，加杠是第四张)
+                kan_type = action.type  # 保存杠的类型
+
+                # --- 验证 ---
+                can_kan = False  # 是否可以杠
+                if kan_type == ActionType.KAN_CLOSED:
+                    can_kan = self.validate_closed_kan(player, tile_to_kan)  # 验证暗杠
+                elif kan_type == ActionType.KAN_ADDED:
+                    can_kan = self.validate_added_kan(player, tile_to_kan)  # 验证加杠
+
+                if can_kan:
+                    print(
+                        f"玩家 {player_index} 宣布 {kan_type.name} 使用 {tile_to_kan}"
+                    )
+
+                    # --- 执行 ---
+                    # 辅助函数处理:
+                    # 1. 将牌从手牌移到副露区 (或更新已有的碰副露为加杠)
+                    # 2. 从杠尾 (死牌区) 摸一张岭上牌 (rinshan pai)
+                    # 3. 将岭上牌赋值给 player.drawn_tile
+                    # 4. 翻开新的杠宝牌指示牌 (Kan Dora)
+                    # 5. 检查是否因四杠导致流局 (在 _perform_kan 内部或调用后处理)
+                    # 6. 清除所有玩家的一发状态
+                    # 7. 检查是否在岭上牌和牌 (岭上开花 - 由下一次动作处理)
+                    kan_successful = self._perform_kan(
+                        player, tile_to_kan, kan_type
+                    )  # 执行杠的操作
+
+                    if not kan_successful:
+                        # 例如，杠尾没有牌了，或杠过程中出现其他错误
+                        print(f"错误: 执行 {kan_type.name} 失败 (可能无岭上牌?)。")
+                        # TODO: 处理这个错误状态 (可能是无效动作或游戏状态问题)
+                        return
+
+                    # --- 状态更新 ---
+                    # 杠牌并摸岭上牌后，玩家仍然处于需要行动的状态
+                    # (通常是打牌，但也可能是岭上开花自摸)。
+                    # 我们保持在 PLAYER_DISCARD 阶段，或者一个类似的 "杠后摸牌" 状态。
+                    # 当前玩家不变。
+                    self.game_phase = (
+                        GamePhase.PLAYER_DISCARD
+                    )  # 或者如果需要，可以是一个特定的 KAN_DISCARD 阶段
+                    print(
+                        f"玩家 {player_index} 杠后摸得岭上牌，需要再次行动 (打牌或自摸)。"
+                    )
+                    # 玩家现在手持 13 张手牌 + 1 张摸到的牌 (岭上牌)
+
+                    # 如果规则允许，检查是否因不同玩家开了四杠导致流局
+                    if self.check_four_kan_abortive_draw():
+                        self._transition_to_abortive_draw("四杠散了 (Four Kan Abort)")
+                        return
+
+                else:
+                    print(
+                        f"错误: 玩家 {player_index} 尝试宣布无效的 {kan_type.name} 使用 {tile_to_kan}。"
+                    )
+                    # TODO: 返回无效动作信号 / 抛出错误
+                    return  # 无效杠
+
+            # 5. 处理 RIICHI (立直) 动作
+            elif action.type == ActionType.RIICHI:
+                # --- 验证 ---
+                # 立直是在打牌 *之前* 宣布的。这个动作包含了要打出的牌。
+                tile_to_discard_for_riichi = action.tile  # 立直时要打出的牌
+
+                # 检查 1: 打算打出的牌是否合法? (与普通打牌逻辑相同)
+                is_discarding_drawn_tile = (
+                    player.drawn_tile is not None
+                    and tile_to_discard_for_riichi == player.drawn_tile
+                )
+                is_discarding_from_hand = any(
+                    t == tile_to_discard_for_riichi for t in player.hand
+                )
+
+                if not (is_discarding_drawn_tile or is_discarding_from_hand):
+                    print(
+                        f"错误: 玩家 {player_index} 立直失败 - 尝试打出无效的牌 {tile_to_discard_for_riichi}。"
+                    )
+                    return  # 为立直打出的牌无效
+
+                # 检查 2: 在打出这张牌 *之前*，玩家是否可以宣布立直?
+                # (这个检查假设是打牌发生 *之前* 的状态)
+                if self.validate_riichi(player):  # 验证立直条件
+                    print(
+                        f"玩家 {player_index} 宣布 Riichi，准备打出 {tile_to_discard_for_riichi}"
+                    )
+
+                    # --- 执行 (第 1 部分: 宣布立直) ---
+                    player.riichi_declared = True  # 标记玩家已立直
+                    player.riichi_declared_this_turn = (
+                        True  # 标记本轮宣布立直，用于管理立即打牌失去一发
+                    )
+                    player.riichi_turn = (
+                        self.current_round_turn
+                    )  # 记录立直的巡目或类似信息
+                    player.score -= 1000  # 扣除立直棒的点数
+                    self.riichi_sticks += 1  # 场上增加一支立直棒
+                    player.ippatsu_chance = True  # 获得一发机会
+
+                    # --- 执行 (第 2 部分: 执行与立直相关的打牌) ---
+                    # 现在，使用 tile_to_discard_for_riichi 执行打牌逻辑
+                    # (这里稍微重复了 DISCARD 的逻辑，可以考虑重构)
+                    if is_discarding_drawn_tile:
+                        print(
+                            f"玩家 {player_index} 立直摸切 {tile_to_discard_for_riichi}"
+                        )
+                        discarded_tile = player.drawn_tile
+                        player.drawn_tile = None
+                    else:  # is_discarding_from_hand
+                        print(
+                            f"玩家 {player_index} 立直手切 {tile_to_discard_for_riichi}"
+                        )
+                        if player.drawn_tile is not None:
+                            player.hand.append(player.drawn_tile)
+                            player.drawn_tile = None
+                        if not self._remove_tiles_from_hand(
+                            player, [tile_to_discard_for_riichi]
+                        ):
+                            print(
+                                f"错误: 立直手切时未能从手牌移除 {tile_to_discard_for_riichi}。手牌: {player.hand}"
+                            )
+                            return  # 严重错误状态
+                        discarded_tile = tile_to_discard_for_riichi
+
+                    # --- 立直打牌后更新游戏状态 ---
+                    player.discards.append(discarded_tile)
+                    self.last_discarded_tile = discarded_tile
+                    self.last_discard_player_index = player_index
+                    player.last_discard_was_tsumogiri = is_discarding_drawn_tile
+
+                    # 在宣布立直的这次打牌后立即失去一发机会
+                    player.ippatsu_chance = False
+                    player.riichi_declared_this_turn = False  # 重置标志
+
+                    # TODO: 检查振听状态
+
+                    # --- 阶段转换：进入响应阶段 ---
+                    print(
+                        f"玩家 {player_index} 立直并打出 {discarded_tile}，进入响应阶段。"
+                    )
+                    self.game_phase = GamePhase.WAITING_FOR_RESPONSE
+                    self._setup_response_phase(discarded_tile)  # 设置响应阶段状态
+
+                else:
+                    print(f"错误: 玩家 {player_index} 尝试宣布 Riichi 但不满足条件。")
+                    # TODO: 返回无效动作信号 / 抛出错误
+                    return  # 无效立直
+
+            # 6. 处理 SPECIAL_DRAW (特殊流局) 动作 (例如九种九牌 Kyuushu Kyuuhai)
+            elif action.type == ActionType.SPECIAL_DRAW:
+                # --- 验证 ---
+                # 通常只在玩家的*第一巡*且没有任何副露/打牌干扰时允许。
+                # 验证函数应检查这些条件。
+                special_draw_reason = self.validate_special_draw(
+                    player
+                )  # 验证特殊流局条件
+                if special_draw_reason:
+                    print(f"玩家 {player_index} 宣布特殊流局: {special_draw_reason}")
+                    # --- 执行 ---
+                    # 转换到流局状态
+                    self._transition_to_abortive_draw(special_draw_reason)
+                else:
+                    print(f"错误: 玩家 {player_index} 尝试宣布特殊流局但不满足条件。")
+                    # TODO: 返回无效动作信号 / 抛出错误
+                    return  # 无效的特殊流局
+
+            # 7. 处理此阶段其他意外的动作
+            else:
+                print(
+                    f"警告: 在 {self.game_phase.name} 阶段收到意外的动作类型 {action.type}。"
+                )
+                # TODO: 返回无效动作信号 / 抛出错误
+                return  # 意外的动作类型
             # TODO: 处理 TSUMO, KAN (Closed/Added), RIICHI, SPECIAL_DRAW 在 PLAYER_DISCARD 阶段的逻辑
             # 这些动作会直接转换阶段 (如 TSUMO -> HAND_OVER_SCORES, KAN -> PLAYER_DRAW replacement tile)
 
@@ -758,8 +975,9 @@ class GameState:
         """
         print("过渡到下一摸牌阶段。")
         # 清理响应阶段的状态
-        self.last_discarded_tile = None
-        self.last_discard_player_index = None
+        # todo 这里清晰last discard 正确吗？
+        # self.last_discarded_tile = None
+        # self.last_discard_player_index = None
         self._response_declarations = {}
         self._responders_to_prompt = []
         self._responded_to_current_discard = set()

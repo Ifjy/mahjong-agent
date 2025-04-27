@@ -1,3 +1,6 @@
+from src.env.core.actions import Action, ActionType, Tile, KanType
+
+
 class Renderer:
     def __init__(self, config):
         self.config = config
@@ -74,27 +77,81 @@ class Renderer:
 
         if game_state.last_action_info:
             print("\n最后动作:", end=" ")
+
             action_type = game_state.last_action_info.get("type")
             player_idx = game_state.last_action_info.get("player")
-            tile_obj = game_state.last_action_info.get("tile")
+            action_obj = game_state.last_action_info.get("action_obj")
 
-            if action_type in {"DISCARD", "RIICHI", "DRAW"}:
-                if tile_obj is not None:
-                    tile_symbol = self._tile_symbols[tile_obj.value]
-                    if action_type == "DISCARD":
-                        print(f"玩家{player_idx} 打出 {tile_symbol}")
-                    elif action_type == "RIICHI":
-                        print(f"玩家{player_idx} 立直 打出 {tile_symbol}")
-                    elif action_type == "DRAW":
-                        print(f"玩家{player_idx} 摸牌 {tile_symbol}")
-                elif action_type == "DRAW":
-                    print(f"玩家{player_idx} 摸牌（流局）")
-            elif action_type in {"TSUMO", "RON"}:
-                print(f"玩家{player_idx} {action_type}")
+            if action_obj is None:
+                print(str(game_state.last_action_info))
+                print("=" * 50 + "\n")
+                return
+
+            # 处理动作对象
+            def tile_to_str(tile: Tile) -> str:
+                return self._tile_symbols[tile.value] + ("r" if tile.is_red else "")
+
+            if action_obj.type == ActionType.DISCARD:
+                tile = action_obj.tile
+                print(f"玩家{player_idx} 打出 {tile_to_str(tile)}")
+
+            elif action_obj.type == ActionType.RIICHI:
+                riichi_tile = action_obj.riichi_discard
+                print(f"玩家{player_idx} 立直 打出 {tile_to_str(riichi_tile)}")
+
+            # elif action_obj.type == ActionType.DRAW:
+            #     tile = action_obj.tile
+            #     if tile is not None:
+            #         print(f"玩家{player_idx} 摸牌 {tile_to_str(tile)}")
+            #     else:
+            #         print(f"玩家{player_idx} 摸牌（流局）")
+
+            elif action_obj.type == ActionType.CHI:
+                chi_tiles = action_obj.chi_tiles
+                tile = action_obj.tile  # 被吃的那张
+                chi_str = " ".join(tile_to_str(t) for t in chi_tiles)
+                print(f"玩家{player_idx} 吃 {tile_to_str(tile)}，用 {chi_str}")
+
+            elif action_obj.type == ActionType.PON:
+                tile = action_obj.tile
+                print(f"玩家{player_idx} 碰 {tile_to_str(tile)}")
+
+            elif action_obj.type == ActionType.KAN:
+                tile = action_obj.tile
+                kan_type = action_obj.kan_type
+                if kan_type == KanType.CLOSED:
+                    print(f"玩家{player_idx} 暗杠 {tile_to_str(tile)}")
+                elif kan_type == KanType.OPEN:
+                    print(f"玩家{player_idx} 明杠 {tile_to_str(tile)}")
+                elif kan_type == KanType.ADDED:
+                    print(f"玩家{player_idx} 加杠 {tile_to_str(tile)}")
+                else:
+                    print(f"玩家{player_idx} 杠 {tile_to_str(tile)}（未知类型）")
+
+            elif action_obj.type == ActionType.TSUMO:
+                winning_tile = action_obj.winning_tile
+                if winning_tile:
+                    print(f"玩家{player_idx} 自摸 {tile_to_str(winning_tile)}")
+                else:
+                    print(f"玩家{player_idx} 自摸")
+
+            elif action_obj.type == ActionType.RON:
+                winning_tile = action_obj.winning_tile
+                if winning_tile:
+                    print(f"玩家{player_idx} 荣和 {tile_to_str(winning_tile)}")
+                else:
+                    print(f"玩家{player_idx} 荣和")
+
+            elif action_obj.type == ActionType.PASS:
+                print(f"玩家{player_idx} 选择跳过")
+
+            elif action_obj.type == ActionType.SPECIAL_DRAW:
+                print(f"玩家{player_idx} 特殊流局宣告")
+
             else:
                 print(str(game_state.last_action_info))
 
-        print("=" * 50 + "\n")
+            print("=" * 50 + "\n")
 
     def close(self):
         pass

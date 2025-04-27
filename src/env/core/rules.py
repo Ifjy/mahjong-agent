@@ -346,7 +346,11 @@ class RulesEngine:
             if tile1_options and tile2_options:
                 # 取第一个找到的实例
                 chi_combo = tuple(sorted((tile1_options[0], tile2_options[0])))
-                chi_actions.append(Action(type=ActionType.CHI, chi_tiles=chi_combo))
+                chi_actions.append(
+                    Action(
+                        type=ActionType.CHI, chi_tiles=chi_combo, tile=discarded_tile
+                    )
+                )
 
         # 模式 2: 需要 T-1, T+1 (例如，有 4m, 6m，吃 5m)
         if 1 <= target_value % 9 <= 7:  # 牌值需 1-7 (索引)
@@ -363,10 +367,22 @@ class RulesEngine:
                     )  # 这样写可能有问题
                     # 正确做法：从 tile1_options 和 tile2_options 中各取一个
                     chi_combo = tuple(sorted((tile1_options[0], tile2_options[0])))
-                    chi_actions.append(Action(type=ActionType.CHI, chi_tiles=chi_combo))
+                    chi_actions.append(
+                        Action(
+                            type=ActionType.CHI,
+                            chi_tiles=chi_combo,
+                            tile=discarded_tile,
+                        )
+                    )
                 elif val1 != val2:
                     chi_combo = tuple(sorted((tile1_options[0], tile2_options[0])))
-                    chi_actions.append(Action(type=ActionType.CHI, chi_tiles=chi_combo))
+                    chi_actions.append(
+                        Action(
+                            type=ActionType.CHI,
+                            chi_tiles=chi_combo,
+                            tile=discarded_tile,
+                        )
+                    )
 
         # 模式 3: 需要 T+1, T+2 (例如，有 6m, 7m，吃 5m)
         if target_value % 9 <= 6:  # 牌值需 <= 6 (索引)
@@ -375,7 +391,11 @@ class RulesEngine:
             tile2_options = [t for t in hand_tiles if t.value == val2]
             if tile1_options and tile2_options:
                 chi_combo = tuple(sorted((tile1_options[0], tile2_options[0])))
-                chi_actions.append(Action(type=ActionType.CHI, chi_tiles=chi_combo))
+                chi_actions.append(
+                    Action(
+                        type=ActionType.CHI, chi_tiles=chi_combo, tile=discarded_tile
+                    )
+                )
 
         # 去重 (可能因为赤牌导致生成了相同的逻辑吃法)
         unique_chi_actions = []
@@ -1043,96 +1063,101 @@ class RulesEngine:
         return context
 
     def calculate_yaku_and_score(
-    self,
-    game_state,
-    hand_outcome: Dict,
-) -> Dict:
-    """
-    计算和牌的役种、翻数、符数和最终得分。基于 hand_outcome 返回。
-    """
+        self,
+        game_state,
+        hand_outcome: Dict,
+    ) -> Dict:
+        """
+        计算和牌的役种、翻数、符数和最终得分。基于 hand_outcome 返回。
+        """
 
-    winner_id = hand_outcome["winner_id"]
-    loser_id = hand_outcome.get("loser_id")  # 自摸时为 None
-    hand_tiles_final = hand_outcome["hand_tiles_final"]
-    melds = hand_outcome["melds"]
-    win_tile = hand_outcome["win_tile"]
-    is_menzen = hand_outcome["is_menzen"]
-    is_riichi = hand_outcome["is_riichi"]
-    is_tsumo = hand_outcome["win_type"] == "tsumo"
-    honba = hand_outcome.get("honba", 0)
-    riichi_sticks = hand_outcome.get("riichi_sticks", 0)
-    dealer_id = hand_outcome["dealer_id"]
-    num_players = hand_outcome["num_players"]
+        winner_id = hand_outcome["winner_id"]
+        loser_id = hand_outcome.get("loser_id")  # 自摸时为 None
+        hand_tiles_final = hand_outcome["hand_tiles_final"]
+        melds = hand_outcome["melds"]
+        win_tile = hand_outcome["win_tile"]
+        is_menzen = hand_outcome["is_menzen"]
+        is_riichi = hand_outcome["is_riichi"]
+        is_tsumo = hand_outcome["win_type"] == "tsumo"
+        honba = hand_outcome.get("honba", 0)
+        riichi_sticks = hand_outcome.get("riichi_sticks", 0)
+        dealer_id = hand_outcome["dealer_id"]
+        num_players = hand_outcome["num_players"]
 
-    # 简化版役种识别
-    han = 1
-    fu = 30
-    yaku_list = [("临时役", 1)]
+        # 简化版役种识别
+        han = 1
+        fu = 30
+        yaku_list = [("临时役", 1)]
 
-    if is_riichi:
-        yaku_list.append(("立直", 1))
-        han += 1
-    if is_tsumo and is_menzen:
-        yaku_list.append(("门前清自摸和", 1))
-        han += 1
-        fu = 20
+        if is_riichi:
+            yaku_list.append(("立直", 1))
+            han += 1
+        if is_tsumo and is_menzen:
+            yaku_list.append(("门前清自摸和", 1))
+            han += 1
+            fu = 20
 
-    # 宝牌计算（可以补充）
-    # dora_han = ...
+        # 宝牌计算（可以补充）
+        # dora_han = ...
 
-    # 基础得点
-    if han >= 5:
-        score_base = 2000
-    elif han == 4:
-        score_base = 1300 if fu == 30 else 2000
-    elif han == 3:
-        score_base = 700 if fu == 30 else 1000
-    elif han == 2:
-        score_base = 400 if fu == 30 else 500
-    else:
-        score_base = 300
+        # 基础得点
+        if han >= 5:
+            score_base = 2000
+        elif han == 4:
+            score_base = 1300 if fu == 30 else 2000
+        elif han == 3:
+            score_base = 700 if fu == 30 else 1000
+        elif han == 2:
+            score_base = 400 if fu == 30 else 500
+        else:
+            score_base = 300
 
-    # 支付计算
-    score_payments = defaultdict(int)
-    total_gain = 0
-    is_dealer_win = (winner_id == dealer_id)
-    honba_bonus = honba * 300
-    riichi_bonus = riichi_sticks * 1000
+        # 支付计算
+        score_payments = defaultdict(int)
+        total_gain = 0
+        is_dealer_win = winner_id == dealer_id
+        honba_bonus = honba * 300
+        riichi_bonus = riichi_sticks * 1000
 
-    if is_tsumo:
-        for pid in range(num_players):
-            if pid == winner_id:
-                continue
-            is_pid_dealer = (pid == dealer_id)
-            if is_dealer_win:
-                payment = ((score_base * 2 + 99) // 100) * 100 + honba_bonus // num_players
-            else:
-                if is_pid_dealer:
-                    payment = ((score_base * 2 + 99) // 100) * 100 + honba_bonus // num_players
+        if is_tsumo:
+            for pid in range(num_players):
+                if pid == winner_id:
+                    continue
+                is_pid_dealer = pid == dealer_id
+                if is_dealer_win:
+                    payment = (
+                        (score_base * 2 + 99) // 100
+                    ) * 100 + honba_bonus // num_players
                 else:
-                    payment = ((score_base + 99) // 100) * 100 + honba_bonus // num_players
-            score_payments[pid] -= payment
-            total_gain += payment
-    else:
-        if loser_id is not None:
-            if is_dealer_win:
-                payment = ((score_base * 6 + 99) // 100) * 100 + honba_bonus
-            else:
-                payment = ((score_base * 4 + 99) // 100) * 100 + honba_bonus
-            score_payments[loser_id] -= payment
-            total_gain += payment
+                    if is_pid_dealer:
+                        payment = (
+                            (score_base * 2 + 99) // 100
+                        ) * 100 + honba_bonus // num_players
+                    else:
+                        payment = (
+                            (score_base + 99) // 100
+                        ) * 100 + honba_bonus // num_players
+                score_payments[pid] -= payment
+                total_gain += payment
+        else:
+            if loser_id is not None:
+                if is_dealer_win:
+                    payment = ((score_base * 6 + 99) // 100) * 100 + honba_bonus
+                else:
+                    payment = ((score_base * 4 + 99) // 100) * 100 + honba_bonus
+                score_payments[loser_id] -= payment
+                total_gain += payment
 
-    score_payments[winner_id] += total_gain + riichi_bonus
+        score_payments[winner_id] += total_gain + riichi_bonus
 
-    return {
-        "yaku": yaku_list,
-        "han": han,
-        "fu": fu,
-        "score_base": score_base,
-        "score_payments": dict(score_payments),
-        "error": None,
-    }
-
+        return {
+            "yaku": yaku_list,
+            "han": han,
+            "fu": fu,
+            "score_base": score_base,
+            "score_payments": dict(score_payments),
+            "error": None,
+        }
 
     def get_hand_outcome(self, game_state: "GameState") -> Dict[str, Any]:
         """
