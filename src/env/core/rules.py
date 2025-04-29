@@ -780,34 +780,6 @@ class RulesEngine:
     # == 计分、役种、符数相关 (占位符/简化实现) ==
     # ======================================================================
 
-    def _get_win_context(
-        self, player: PlayerState, game_state: GameState, is_tsumo: bool, win_tile: Tile
-    ) -> Dict:
-        """(辅助) 收集和牌时需要的上下文信息"""
-        context = {
-            "is_tsumo": is_tsumo,
-            "is_ron": not is_tsumo,
-            "is_riichi": player.riichi_declared,
-            "is_ippatsu": player.ippatsu_chance,  # 需要在apply_action中正确维护
-            "is_menzen": player.is_menzen,
-            "player_wind": player.seat_wind,
-            "round_wind": game_state.round_wind,
-            "dora_indicators": list(game_state.wall.dora_indicators),  # 复制列表
-            "ura_dora_indicators": (
-                list(game_state.wall.ura_dora_indicators)
-                if player.riichi_declared
-                else []
-            ),
-            "is_dealer": game_state.dealer_index == player.player_id,
-            "honba": game_state.honba,
-            "riichi_sticks": game_state.riichi_sticks,
-            "win_tile": win_tile,
-            "turn_number": game_state.turn_number,
-            "wall_remaining": game_state.wall.get_remaining_live_tiles_count(),
-            # 可以添加更多信息，如 'last_action_type' (判断枪杠), 'is_haitei' (海底), 'is_houtei' (河底) 等
-        }
-        return context
-
     def calculate_yaku_and_score(
         self,
         hand_tiles_final: List[Tile],  # 和牌时的14张牌
