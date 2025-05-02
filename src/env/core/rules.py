@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import (
     List,
     Dict,
@@ -9,6 +10,7 @@ from typing import (
 )  # 引入类型提示
 from collections import Counter, defaultdict  # 引入 Counter 和 defaultdict
 import itertools  # 可能用于组合生成
+
 
 # --- 从核心模块导入类 ---
 # 假设这些文件在同一目录下或路径已配置
@@ -590,38 +592,120 @@ class RulesEngine:
 
         return True
 
+    def has_at_least_one_yaku(
+        self,
+        hand: List[Tile],
+        melds: List[Dict],
+        win_tile: Tile,
+        player: PlayerState,
+        game_state: GameState,
+        is_tsumo: bool,
+    ) -> bool:
+        """
+        检查手牌是否包含至少一番的役种。
+        这个方法不需要计算最终番数和点数，只需判断总役番数是否 >= 1。
+        """
+        # TODO: 实现役种判断的核心逻辑
+        # 这可能是 RulesEngine 中最复杂的逻辑之一
+        # 需要考虑的因素包括：
+        # 1. 手牌组合（平和、断幺九、一盃口、三色同顺、一气贯通、混全带幺九等）
+        # 2. 副露情况（门前清、对对和、三暗刻、三杠子、混老头、小三元、混一色、清一色等）
+        # 3. 荣和/自摸区别（门前清自摸和）
+        # 4. 荣和的牌（役牌、风牌）
+        # 5. 游戏状态（立直、一发、海底/河底、岭上、抢杠、宝牌、里宝牌、红宝牌）
+        # 6. 特殊役（七对子、国士无双）
+        # 7. 役满判断（国士无双十三面、四暗刻、大三元、字一色、清老头、绿一色、九莲宝灯、四风连打、大四喜、小四喜、四杠子、地和、天和、纯正九莲宝灯、四暗刻单骑）
+
+        # 一个常见的实现方式是：
+        # 1. 判断所有可能的基础役种（不含番数增加因素，如宝牌）
+        # 2. 计算基础役种的总 Han 数
+        # 3. 根据游戏状态（立直、一发、宝牌等）增加 Han 数
+        # 4. 判断最终总 Han 数是否 >= 1 (对于役满，通常直接返回 True)
+
+        # 需要获取宝牌信息：
+        # current_dora_tiles = game_state.wall.get_current_dora_tiles()
+        # 需要获取玩家状态：
+        # player.riichi_declared, player.ippatsu_chance, player.seat_wind
+        # 需要获取场风：
+        # game_state.round_wind
+
+        print(
+            "Warning: has_at_least_one_yaku is a placeholder, implement actual yaku logic."
+        )
+        # Placeholder: 假设永远有役 (错误!)
+        # 实际需要根据手牌和规则判断
+        # if self._calculate_total_han(hand, melds, win_tile, player, game_state, is_tsumo) >= 1:
+        #     return True
+        # return False
+        return True  # Placeholder: 暂时返回 True 以便代码结构跑通
+
+    # 检查振听的方法 (你需要实现它)
+    def _is_furiten(
+        self, player: PlayerState, win_tile: Tile, game_state: GameState
+    ) -> bool:
+        """检查玩家是否处于振听状态 (对目标牌不能荣和)"""
+        # TODO: 实现振听检查逻辑
+        # 1. 手牌听的牌是否在自己的牌河 (player.discards) 中？
+        #    - 需要先计算 player.hand (不含摸牌) 和 player.melds 的听牌列表。
+        #    - 遍历听牌列表，检查是否在 player.discards 中。
+        # 2. 立直后过手？（对任意听牌，立直后如果对别家打出的牌没有荣和，则进入永久振听直到下次摸牌）
+        # 3. 同巡振听？（对本次摸牌后，到自己下次摸牌前的任何其他玩家的弃牌，如果听的牌过手，则对本巡的任何听牌对象都振听）
+
+        print("Warning: _is_furiten is a placeholder, implement actual furiten logic.")
+        return False  # Placeholder: 暂时假设没有振听
+
     def _can_ron(
         self, player: PlayerState, target_tile: Tile, game_state: GameState
     ) -> bool:
         """检查玩家是否能荣和目标牌"""
-        if not target_tile:
+        # 使用 'is None' 更清晰地检查 None
+        if target_tile is None:
+            # print("Debug: 目标牌为 None，不能荣和")
             return False
 
         # 组成模拟手牌 (手牌 + 目标牌)
-        potential_hand = player.hand + [target_tile]
+        # 使用 list()[:] 或 copy.copy() 创建浅拷贝，避免修改原始 player.hand
+        # 假设 player.hand 是列表
+        potential_hand = list(player.hand) + [target_tile]
+        # 为了 check_win 函数内部逻辑可能需要的排序，这里排序一下模拟手牌
+        potential_hand.sort()
 
-        # 1. 检查是否和牌型
+        # 1. 检查是否和牌型 (基本形状)
+        # check_win 只需要手牌和副露来判断形状
         if not self.check_win(potential_hand, player.melds):
+            # print(f"Debug: 玩家 {player.player_id} 荣和 {target_tile} 不满足和牌形状")
             return False
 
-        # 2. 检查振听 (Furiten) - 复杂规则
-        # TBD: 实现振听检查逻辑 _is_furiten
-        # if self._is_furiten(player, target_tile, game_state):
-        #     print(f"Debug: 玩家 {player.player_id} 荣和 {target_tile} 触发振听")
-        #     return False
+        # 2. 检查振听 (Furiten)
+        # 需要实现 _is_furiten 方法
+        # _is_furiten 需要玩家的原始手牌（不含 target_tile）、牌河、立直状态等信息
+        # 这里传入 player 即可
+        if self._is_furiten(player, target_tile, game_state):
+            # print(f"Debug: 玩家 {player.player_id} 荣和 {target_tile} 触发振听")
+            return False
 
         # 3. 检查是否有役 (一番缚)
-        # TBD: 实现役种检查
-        context = self._get_win_context(
-            player, game_state, is_tsumo=False, win_tile=target_tile
-        )
-        yaku_info = self.calculate_yaku_and_score(
-            potential_hand, player.melds, target_tile, context
-        )
-        if yaku_info.get("han", 0) < 1:
-            # print(f"Debug: 玩家 {player.player_id} 荣和成型但无役")
-            return False  # 无役不能和牌
+        # 调用专门检查是否有役的方法，传入必要的上下文信息
+        # is_tsumo=False 表示这是荣和的情况
+        if not self.has_at_least_one_yaku(
+            potential_hand,
+            player.melds,
+            target_tile,
+            player,
+            game_state,
+            is_tsumo=False,
+        ):
+            # print(f"Debug: 玩家 {player.player_id} 荣和 {target_tile} 满足形状但无役")
+            return False
 
+        # 4. (可选) 其他特殊荣和限制，如头跳等。
+        # 如果你实现了头跳规则，这里可能需要检查是否有其他玩家对同一张牌比当前玩家更早宣告了荣和。
+        # 这需要 game_state 中记录当前弃牌被哪些玩家宣告了荣和，以及处理顺序。
+        # if self._check_other_ron_restrictions(player, target_tile, game_state):
+        #      return False # 因为规则禁止而不能荣和
+
+        # 如果通过所有检查，则可以荣和
+        # print(f"Debug: 玩家 {player.player_id} 可以荣和 {target_tile}")
         return True
 
     def _can_pon(self, player: PlayerState, target_tile: Tile) -> bool:
@@ -1681,7 +1765,7 @@ class RulesEngine:
         print(f"Debug Next State: Calculated next hand state: {next_hand_state}")
         return next_hand_state
 
-    def valid_closed_kan(self, player: PlayerState, tile_to_kan: Tile) -> bool:
+    def validate_closed_kan(self, player: PlayerState, tile_to_kan: Tile) -> bool:
         """
         检查玩家是否可以进行暗杠 (Closed Kan)。
 

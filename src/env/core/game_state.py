@@ -1,9 +1,10 @@
+from __future__ import annotations
 import random
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple, Set  # 引入类型提示
 from collections import Counter
-from __future__ import annotations
+
 
 # --- 从 actions.py 导入我们定义好的类 ---
 # 假设 actions.py 与 game_state.py 在同一目录下或已正确配置路径
