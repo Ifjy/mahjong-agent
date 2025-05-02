@@ -17,6 +17,94 @@ class Renderer:
         symbols.extend(["东", "南", "西", "北", "白", "发", "中"])
         return symbols
 
+    def _get_tile_string(self, tile: Tile) -> str:
+        """将 Tile 对象渲染成字符串 (例如 '1m', '5pr')"""
+        if tile is None:
+            return "???"  # 或者其他表示空牌的符号
+        # 确保 tile.value 在 _tile_symbols 中，或者提供一个回退
+        base = self._tile_symbols.get(tile.value, f"T({tile.value})")
+        # 假设 Tile 对象有 is_red 属性
+        return base + ("r" if getattr(tile, "is_red", False) else "")
+
+    def render_action_to_string(self, action: Action, player_idx: int = -1) -> str:
+        """将 Action 对象渲染成人类可读的字符串"""
+        # player_idx 是可选的，用于添加 "玩家X" 前缀
+        player_prefix = f"玩家{player_idx} " if player_idx != -1 else ""
+
+        action_type = action.type  # 假设 Action 对象有 type 属性
+
+        if action_type == ActionType.DISCARD:
+            # 假设 Action 对象有 tile 属性
+            tile = action.tile
+            return f"{player_prefix}打出 {self._get_tile_string(tile)}"
+
+        elif action_type == ActionType.RIICHI:
+            # 假设 Riichi Action 对象有 riichi_discard 属性
+            riichi_tile = action.riichi_discard
+            return f"{player_prefix}立直 打出 {self._get_tile_string(riichi_tile)}"
+
+        elif action_type == ActionType.CHI:
+            # 假设 Chi Action 对象有 chi_tiles 和 tile 属性
+            chi_tiles = action.chi_tiles
+            target_tile = action.tile  # 被吃的那张
+            chi_str = " ".join(self._get_tile_string(t) for t in chi_tiles)
+            return (
+                f"{player_prefix}吃 {self._get_tile_string(target_tile)}，用 {chi_str}"
+            )
+
+        elif action_type == ActionType.PON:
+            # 假设 Pon Action 对象有 tile 属性
+            tile = action.tile
+            return f"{player_prefix}碰 {self._get_tile_string(tile)}"
+
+        elif action_type == ActionType.KAN:
+            # 假设 Kan Action 对象有 tile 和 kan_type 属性
+            tile = action.tile
+            kan_type = action.kan_type
+            if kan_type == KanType.CLOSED:
+                kan_str = "暗杠"
+            elif kan_type == KanType.OPEN:
+                kan_str = "明杠"
+            elif kan_type == KanType.ADDED:
+                kan_str = "加杠"
+            else:
+                kan_str = "杠"  # 未知类型
+            return f"{player_prefix}{kan_str} {self._get_tile_string(tile)}"
+
+        elif action_type == ActionType.TSUMO:
+            # 假设 Tsumo Action 对象有 winning_tile 属性
+            winning_tile = action.winning_tile
+            if winning_tile:
+                return f"{player_prefix}自摸 {self._get_tile_string(winning_tile)}"
+            else:
+                return f"{player_prefix}自摸"
+
+        elif action_type == ActionType.RON:
+            # 假设 Ron Action 对象有 winning_tile 属性
+            winning_tile = action.winning_tile
+            if winning_tile:
+                return f"{player_prefix}荣和 {self._get_tile_string(winning_tile)}"
+            else:
+                return f"{player_prefix}荣和"
+
+        elif action_type == ActionType.PASS:
+            return f"{player_prefix}选择跳过"
+
+        elif action_type == ActionType.SPECIAL_DRAW:
+            return f"{player_prefix}特殊流局宣告"
+
+        # 可以添加对 DRAW 的处理（如果需要渲染摸牌动作）
+        # elif action_type == ActionType.DRAW:
+        #    tile = action.tile # 假设 Draw Action 有 tile 属性
+        #    if tile is not None:
+        #        return f"{player_prefix}摸牌 {self._get_tile_string(tile)}"
+        #    else:
+        #        return f"{player_prefix}摸牌（流局）"
+
+        else:
+            # 对于未明确处理的动作类型，返回其默认字符串表示
+            return f"{player_prefix}{str(action)}"
+
     def render(self, game_state, mode="human"):
         if mode == "human":
             self._render_text(game_state)
@@ -87,68 +175,12 @@ class Renderer:
                 print("=" * 50 + "\n")
                 return
 
-            # 处理动作对象
-            def tile_to_str(tile: Tile) -> str:
-                return self._tile_symbols[tile.value] + ("r" if tile.is_red else "")
-
-            if action_obj.type == ActionType.DISCARD:
-                tile = action_obj.tile
-                print(f"玩家{player_idx} 打出 {tile_to_str(tile)}")
-
-            elif action_obj.type == ActionType.RIICHI:
-                riichi_tile = action_obj.riichi_discard
-                print(f"玩家{player_idx} 立直 打出 {tile_to_str(riichi_tile)}")
-
-            # elif action_obj.type == ActionType.DRAW:
-            #     tile = action_obj.tile
-            #     if tile is not None:
-            #         print(f"玩家{player_idx} 摸牌 {tile_to_str(tile)}")
-            #     else:
-            #         print(f"玩家{player_idx} 摸牌（流局）")
-
-            elif action_obj.type == ActionType.CHI:
-                chi_tiles = action_obj.chi_tiles
-                tile = action_obj.tile  # 被吃的那张
-                chi_str = " ".join(tile_to_str(t) for t in chi_tiles)
-                print(f"玩家{player_idx} 吃 {tile_to_str(tile)}，用 {chi_str}")
-
-            elif action_obj.type == ActionType.PON:
-                tile = action_obj.tile
-                print(f"玩家{player_idx} 碰 {tile_to_str(tile)}")
-
-            elif action_obj.type == ActionType.KAN:
-                tile = action_obj.tile
-                kan_type = action_obj.kan_type
-                if kan_type == KanType.CLOSED:
-                    print(f"玩家{player_idx} 暗杠 {tile_to_str(tile)}")
-                elif kan_type == KanType.OPEN:
-                    print(f"玩家{player_idx} 明杠 {tile_to_str(tile)}")
-                elif kan_type == KanType.ADDED:
-                    print(f"玩家{player_idx} 加杠 {tile_to_str(tile)}")
-                else:
-                    print(f"玩家{player_idx} 杠 {tile_to_str(tile)}（未知类型）")
-
-            elif action_obj.type == ActionType.TSUMO:
-                winning_tile = action_obj.winning_tile
-                if winning_tile:
-                    print(f"玩家{player_idx} 自摸 {tile_to_str(winning_tile)}")
-                else:
-                    print(f"玩家{player_idx} 自摸")
-
-            elif action_obj.type == ActionType.RON:
-                winning_tile = action_obj.winning_tile
-                if winning_tile:
-                    print(f"玩家{player_idx} 荣和 {tile_to_str(winning_tile)}")
-                else:
-                    print(f"玩家{player_idx} 荣和")
-
-            elif action_obj.type == ActionType.PASS:
-                print(f"玩家{player_idx} 选择跳过")
-
-            elif action_obj.type == ActionType.SPECIAL_DRAW:
-                print(f"玩家{player_idx} 特殊流局宣告")
-
+            if action_obj is not None and player_idx is not None:
+                # 直接调用渲染方法
+                last_action_str = self.render_action_to_string(action_obj, player_idx)
+                print(last_action_str)
             else:
+                # 如果信息不全，打印原始信息作为回退
                 print(str(game_state.last_action_info))
 
             print("=" * 50 + "\n")

@@ -2,7 +2,7 @@ import random
 from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple, Set  # 引入类型提示
-
+from collections import Counter
 
 # --- 从 actions.py 导入我们定义好的类 ---
 # 假设 actions.py 与 game_state.py 在同一目录下或已正确配置路径
@@ -1144,32 +1144,61 @@ class GameState:
         self.current_player_index = -1  # 没有当前行动玩家
         # TODO: 实现流局时的得分计算和状态清理
 
-    def _remove_tiles_from_hand(self, player, tiles_to_remove: List[Tile]):
+    def _remove_tiles_from_hand(
+        self, player: "PlayerState", tiles_to_remove: List["Tile"]
+    ) -> bool:
         """
-        从玩家手牌中移除指定的牌列表。处理赤宝牌和多张相同普通牌的情况。
+        尝试从玩家手牌中移除指定的牌列表。要求精确匹配 Tile 对象 (通过 __eq__ 判断 value 和 is_red)。
+        返回 True 表示成功移除所有牌并更新玩家手牌，False 表示至少有一张牌无法找到并移除，不修改玩家手牌。
         """
-        hand_tiles = list(player.hand)  # 创建手牌的副本进行操作
-        for tile_to_remove in tiles_to_remove:
-            removed = False
-            # 尝试移除指定对象（包括赤宝牌标识）
-            if tile_to_remove in hand_tiles:
-                hand_tiles.remove(tile_to_remove)
-                removed = True
-            else:
-                # 如果指定对象不在，尝试移除同类型的普通牌 (例如，要移除赤5，但手牌只有普通5)
-                normal_tile_of_same_value = Tile(tile_to_remove.value, is_red=False)
-                if normal_tile_of_same_value in hand_tiles:
-                    hand_tiles.remove(normal_tile_of_same_value)
-                    removed = True
-                # TODO: 更复杂的赤宝牌移除逻辑，例如打出普通5，手牌有赤5和普通5，应该移除普通5
+        if not tiles_to_remove:
+            # 如果列表为空，认为成功移除（什么都没做）
+            return True
 
-            if not removed:
+        # 创建手牌的副本进行操作
+        temp_hand = list(player.hand)
+
+        # 使用 Counter 来方便地检查手牌是否包含足够数量的特定牌（包括赤宝牌标识）
+        # 需要确保 Tile 类正确实现了 __eq__ 和 __hash__ 方法，通常 dataclass(frozen=True) 会自动生成。
+        hand_counts = Counter(temp_hand)
+        tiles_needed_to_remove_counts = Counter(tiles_to_remove)
+
+        # --- 检查手牌是否足够 ---
+        # 遍历需要移除的每种特定牌及其数量
+        for tile, count_needed in tiles_needed_to_remove_counts.items():
+            # 检查手牌中这种特定牌的数量是否小于需要的数量
+            if hand_counts[tile] < count_needed:
                 print(
-                    f"内部错误: 无法从玩家 {player.index} 手牌中移除牌 {tile_to_remove}。手牌: {player.hand}"
+                    f"错误: 玩家 {player.player_index} 手牌不足以移除牌 {tile} (需要 {count_needed}, 手牌只有 {hand_counts[tile]})。"
                 )
-                # 这表示规则判断或动作生成有问题，玩家不应该选择这个动作
+                # 打印当前手牌状态以供 Debug
+                print(f"玩家 {player.player_index} 当前手牌: {player.hand}")
+                return False  # 手牌不足，移除失败，立即返回 False
 
-        player.hand = hand_tiles  # 更新玩家手牌
+        # --- 执行移除操作 ---
+        # 如果手牌足够，则从手牌副本中移除这些牌
+        # 更安全且高效的方式是构建一个新的列表，只包含不需要移除的牌
+        new_hand = []
+        # 使用一个临时的 Counter 来追踪我们还需要移除的每种牌的数量
+        temp_tiles_to_remove_counts = Counter(tiles_needed_to_remove_counts)
+
+        for tile in temp_hand:
+            # 如果当前遍历到的牌在需要移除的列表中，并且我们还需要移除这种牌
+            if temp_tiles_to_remove_counts[tile] > 0:
+                temp_tiles_to_remove_counts[
+                    tile
+                ] -= 1  # 则从需要移除的数量中减一（即“移除了”这张牌）
+            else:
+                new_hand.append(tile)  # 否则，这张牌保留在新手牌中
+
+        # 经过循环，new_hand 应该就是移除指定牌后的手牌列表了
+        # 所有在 tiles_to_remove 中的牌都应该被“移除”了 temp_tiles_to_remove_counts 应该都归零了
+
+        # --- 更新玩家手牌 ---
+        player.hand = new_hand
+
+        # print(f"玩家 {player.player_index} 成功移除了牌 {tiles_to_remove}。") # Debug 辅助
+        return True  # 成功移除所有指定的牌
 
     # TODO: 添加计算得分的方法 calculate_scores_ron 等
 

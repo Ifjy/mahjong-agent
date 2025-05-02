@@ -1502,9 +1502,9 @@ class RulesEngine:
 
         # 1. 判断庄家是否轮换 (亲流れ / Renchan)
         dealer_changes = False
-        is_win = end_type in {END_TYPE_TSUMO, END_TYPE_RON}
-        is_exhaustive_draw = end_type == END_TYPE_EXHAUSTIVE_DRAW
-        is_special_draw = end_type == END_TYPE_SPECIAL_DRAW  # 特殊流局通常连庄
+        is_win = end_type in {"TSUMO", "RON"}
+        is_exhaustive_draw = end_type == "EXHAUSTIVE_DRAW"
+        is_special_draw = end_type == "SPECIAL_DRAW"  # 特殊流局通常连庄
 
         if is_win:
             if winner_index != current_dealer:

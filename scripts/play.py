@@ -50,7 +50,8 @@ def main():
         # 打印可用动作
         print(f"可选动作({len(valid_actions)}个):")
         for i, action in enumerate(valid_actions):
-            print(f"{i}: {action}")
+            action_str = env.render.render_action_to_string(action)
+            print(f"{i}: {action_str}")
 
         # --- 改进的简单AI：选择逻辑 ---
         chosen_index = -1  # 初始化为无效索引
@@ -79,8 +80,11 @@ def main():
         if chosen_index == -1:
             print("警告：未能从合法动作列表中选定动作。默认选择第一个动作。")
             chosen_index = 0  # 作为最后的备用方案，选择第一个动作
-
-        print(f"\n执行动作: {valid_actions[chosen_index]}")
+        chosen_action = valid_actions[chosen_index]
+        chosen_action_str = env.render.render_action_to_string(
+            chosen_action
+        )  # 调用渲染方法
+        print(f"\n执行动作: {chosen_action_str}")
         # --- 结束改进的简单AI选择逻辑 ---
 
         # 执行动作
