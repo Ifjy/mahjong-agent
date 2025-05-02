@@ -21,10 +21,24 @@ class Renderer:
         """将 Tile 对象渲染成字符串 (例如 '1m', '5pr')"""
         if tile is None:
             return "???"  # 或者其他表示空牌的符号
+            # 检查 tile 对象是否有 'value' 属性
+        if not hasattr(tile, "value"):
+            # 如果 tile 没有 value 属性，返回一个错误指示字符串
+            return f"InvalidTile({type(tile).__name__})"
+        tile_value = tile.value
+        if (
+            not isinstance(tile_value, int)
+            or tile_value < 0
+            or tile_value >= len(self._tile_symbols)
+        ):
+            # 如果 value 不是一个有效的整数索引，或者超出了列表范围，
+            # 返回一个错误指示字符串，表明该牌值无法找到对应符号
+            return f"UnknownValue({tile_value})"
         # 确保 tile.value 在 _tile_symbols 中，或者提供一个回退
-        base = self._tile_symbols.get(tile.value, f"T({tile.value})")
+        base_symbol = self._tile_symbols[tile_value]
+        is_red = getattr(tile, "is_red", False)
         # 假设 Tile 对象有 is_red 属性
-        return base + ("r" if getattr(tile, "is_red", False) else "")
+        return base_symbol + ("r" if is_red else "")
 
     def render_action_to_string(self, action: Action, player_idx: int = -1) -> str:
         """将 Action 对象渲染成人类可读的字符串"""
