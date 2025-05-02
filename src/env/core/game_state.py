@@ -3,6 +3,7 @@ from enum import Enum, auto
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any, Tuple, Set  # 引入类型提示
 from collections import Counter
+from __future__ import annotations
 
 # --- 从 actions.py 导入我们定义好的类 ---
 # 假设 actions.py 与 game_state.py 在同一目录下或已正确配置路径
@@ -13,12 +14,16 @@ from .actions import Action, ActionType, Tile, KanType
 import random
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Tuple  # 引入类型提示
+from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING  # 引入类型提示
 
 # --- 从 actions.py 导入我们定义好的类 ---
 # 假设 actions.py 与 game_state.py 在同一目录下或已正确配置路径
 # 如果不在同一目录，需要调整 import 路径，例如 from src.env.core.actions import ...
 from .actions import Action, ActionType, Tile, KanType
+
+if TYPE_CHECKING:
+    # 只有在 TYPE_CHECKING 为 True 时，这个导入才会被处理
+    from rules import RulesEngine
 
 
 @dataclass(frozen=True)
@@ -207,6 +212,52 @@ class Wall:
         """返回活动牌墙剩余牌数"""
         return len(self.live_tiles)
 
+    def _calculate_next_tile_value(self, value: int) -> int:
+        """内部方法：根据指示牌的value计算下一个宝牌的value"""
+        # 万子/筒子/索子 (0-26)
+        if 0 <= value <= 26:
+            suit_offset = (value // 9) * 9  # 0, 9, 18
+            number_in_suit = value % 9  # 0-8 (对应 1-9)
+            # 宝牌是数字+1，但9的宝牌是1
+            next_number_in_suit = (number_in_suit + 1) % 9  # 8(9) -> 0(1)
+            return suit_offset + next_number_in_suit
+        # 风牌 (27-30) 东南北西
+        elif 27 <= value <= 30:
+            # 东(27)->南(28)->西(29)->北(30)->东(27)
+            return 27 + ((value - 27 + 1) % 4)
+        # 三元牌 (31-33) 白发中
+        elif 31 <= value <= 33:
+            # 白(31)->发(32)->中(33)->白(31)
+            return 31 + ((value - 31 + 1) % 3)
+        else:
+            # 理论上不应该有其他值
+            raise ValueError(f"Invalid tile value for calculating Dora: {value}")
+
+    def get_current_dora_tiles(self) -> List[Tile]:
+        """
+        返回当前所有宝牌指示牌指示的实际宝牌列表。
+        这些是 Tile 实例，代表哪些牌是宝牌，但不包含其原本的 is_red 属性。
+        是否是红宝牌是在渲染时判断原始牌实例的 is_red 属性。
+        """
+        current_dora_tiles: List[Tile] = []
+        for indicator_tile in self.dora_indicators:
+            try:
+                # 根据指示牌的 value 计算出宝牌的 value
+                dora_value = self._calculate_next_tile_value(indicator_tile.value)
+                # 创建一个代表这个宝牌的 Tile 实例，is_red 设为 False，因为宝牌本身不带红色属性
+                # 红宝牌是牌局中实际存在的红色的牌，如果它的 value 恰好是宝牌值，那它就是红宝牌。
+                # 这里的 Tile 实例仅用于判断哪些 value 是宝牌。
+                current_dora_tiles.append(
+                    Tile(value=dora_value, is_red=False)
+                )  # 注意这里 is_red=False
+            except ValueError as e:
+                print(
+                    f"Warning: Could not calculate Dora for indicator {indicator_tile}: {e}"
+                )
+                # 可以在这里添加一个占位符牌或者忽略，取决于你希望如何处理错误
+                pass  # 简单忽略错误指示牌
+        return current_dora_tiles
+
 
 class GameState:
     """
@@ -215,9 +266,7 @@ class GameState:
     不包含复杂的控制流或规则校验逻辑。
     """
 
-    rules_engine: "RulesEngine" = field(init=False)
-
-    def __init__(self, config, wall: Wall, rules_engine: "RulesEngine"):
+    def __init__(self, config, wall: Wall, rules_engine: RulesEngine):
         """
         初始化游戏状态。
         Args:
@@ -234,7 +283,7 @@ class GameState:
 
         # --- 牌墙状态 ---
         self.wall: Wall = wall
-        self.rules_engine: "RulesEngine" = rules_engine
+        self.rules_engine: RulesEngine = rules_engine
         # --- 游戏进程状态 ---
         self.round_wind: int = 0  # 当前场风 (0=东, 1=南, ...)
         self.round_number: int = 1  # 当前局数 (1-4)
@@ -397,7 +446,9 @@ class GameState:
         return False
 
     # --- 辅助方法：执行合法的杠动作的状态变更 ---
-    def _perform_kan(self, player: "PlayerState", action: "Action") -> bool: # 接收整个 Action 对象
+    def _perform_kan(
+        self, player: "PlayerState", action: "Action"
+    ) -> bool:  # 接收整个 Action 对象
         """
         执行合法的杠动作的状态变更 (移牌、摸岭上、翻宝牌等)。
         在 apply_action 中验证杠合法性后调用。
@@ -415,38 +466,49 @@ class GameState:
         tiles_to_meld = action.meld_tiles
 
         if kan_type is None or not tiles_to_meld:
-             print(f"内部错误: 执行 KAN 操作时 Action 对象缺少 kan_type 或 meld_tiles。Action: {action}")
-             # 这表明动作生成或传递存在问题
-             return False # 动作信息不完整，杠操作失败
+            print(
+                f"内部错误: 执行 KAN 操作时 Action 对象缺少 kan_type 或 meld_tiles。Action: {action}"
+            )
+            # 这表明动作生成或传递存在问题
+            return False  # 动作信息不完整，杠操作失败
 
-        print(f"执行杠操作: 玩家 {player.player_index}, 类型: {kan_type.name}, 构成牌: {tiles_to_meld}")
+        print(
+            f"执行杠操作: 玩家 {player.player_index}, 类型: {kan_type.name}, 构成牌: {tiles_to_meld}"
+        )
 
         # --- 1. 从手牌中移除构成杠的牌 ---
         # 使用辅助方法 _remove_tiles_from_hand 来精确移除 tiles_to_meld 列表中的牌对象
         # _remove_tiles_from_hand 返回 True/False 表示是否成功移除
         if not self._remove_tiles_from_hand(player, tiles_to_meld):
-             # 如果移除失败，_remove_tiles_from_hand 内部应该打印错误
-             # 这不应该发生如果之前的验证 (RulesEngine) 是正确的
-             print(f"内部错误: 玩家 {player.player_index} 执行 {kan_type.name} 杠时从手牌移除牌失败 {tiles_to_meld}。")
-             return False # 移除失败，杠操作失败
-
+            # 如果移除失败，_remove_tiles_from_hand 内部应该打印错误
+            # 这不应该发生如果之前的验证 (RulesEngine) 是正确的
+            print(
+                f"内部错误: 玩家 {player.player_index} 执行 {kan_type.name} 杠时从手牌移除牌失败 {tiles_to_meld}。"
+            )
+            return False  # 移除失败，杠操作失败
 
         # --- 2. 将牌添加到副露 ---
         if kan_type == KanType.CLOSED:
             # 暗杠 (Ankan): 将移除的 4 张牌添加到副露列表
             if len(tiles_to_meld) != 4:
-                 print(f"内部错误: CLOSED KAN 动作的 meld_tiles 数量不为 4。Tiles: {tiles_to_meld}")
-                 return False # 动作信息错误
+                print(
+                    f"内部错误: CLOSED KAN 动作的 meld_tiles 数量不为 4。Tiles: {tiles_to_meld}"
+                )
+                return False  # 动作信息错误
 
-            player.melds.append({"type": KanType.CLOSED, "tiles": tiles_to_meld}) # 使用移除的牌对象列表构建副露
+            player.melds.append(
+                {"type": KanType.CLOSED, "tiles": tiles_to_meld}
+            )  # 使用移除的牌对象列表构建副露
             print(f"玩家 {player.player_index} 完成暗杠，副露: {player.melds[-1]}")
 
         elif kan_type == KanType.ADDED:
             # 加杠 (Kakan/Shouminkan): 将移除的 1 张牌添加到已有的碰副露上
             if len(tiles_to_meld) != 1:
-                 print(f"内部错误: ADDED KAN 动作的 meld_tiles 数量不为 1。Tiles: {tiles_to_meld}")
-                 return False # 动作信息错误
-            tile_to_add = tiles_to_meld[0] # 加杠的那张牌对象
+                print(
+                    f"内部错误: ADDED KAN 动作的 meld_tiles 数量不为 1。Tiles: {tiles_to_meld}"
+                )
+                return False  # 动作信息错误
+            tile_to_add = tiles_to_meld[0]  # 加杠的那张牌对象
 
             # 找到可以进行加杠的现有碰副露
             target_meld = None
@@ -458,17 +520,19 @@ class GameState:
                     # 进一步检查：确认这个碰牌副露中的牌与要加杠的牌数值相同
                     # 虽然不是严格必须（规则允许同数值不同红宝牌），但通常如此
                     if meld["tiles"][0].value == tile_to_add.value:
-                         target_meld = meld
-                         break # 找到第一个匹配的碰副露
+                        target_meld = meld
+                        break  # 找到第一个匹配的碰副露
 
             if not target_meld:
-                 # 这通常不应发生如果 RulesEngine 验证正确
-                 print(f"内部错误: 玩家 {player.player_index} 尝试加杠 {tile_to_add} 但找不到匹配的碰副露。副露: {player.melds}")
-                 return False # 找不到目标副露，加杠失败
+                # 这通常不应发生如果 RulesEngine 验证正确
+                print(
+                    f"内部错误: 玩家 {player.player_index} 尝试加杠 {tile_to_add} 但找不到匹配的碰副露。副露: {player.melds}"
+                )
+                return False  # 找不到目标副露，加杠失败
 
             # 更新目标副露：修改类型为 KanType.ADDED，并添加加杠的牌
             target_meld["type"] = KanType.ADDED
-            target_meld["tiles"].append(tile_to_add) # 将移除的那张牌添加到副露
+            target_meld["tiles"].append(tile_to_add)  # 将移除的那张牌添加到副露
             # Optional: Re-sort the tiles in the meld if you want consistent representation
             # target_meld["tiles"].sort(...)
             print(f"玩家 {player.player_index} 完成加杠，副露更新: {target_meld}")
@@ -478,14 +542,16 @@ class GameState:
         # and add to player melds as KanType.OPEN.
 
         # --- 3. 从杠尾 (死牌区) 摸一张岭上牌 (rinshan pai) ---
-        replacement_tile = self.wall.draw_replacement_tile() # 需要 Wall.draw_replacement_tile() -> Optional[Tile]
+        replacement_tile = (
+            self.wall.draw_replacement_tile()
+        )  # 需要 Wall.draw_replacement_tile() -> Optional[Tile]
 
         if replacement_tile is None:
             # 杠尾无牌 -> 杠操作失败，导致流局
             print("杠尾无牌，无法摸取岭上牌！")
             # 返回 False 信号给 apply_action，由 apply_action 处理流局转换
             # 注意：此时牌已经从手牌移出并形成了副露。游戏会进入流局状态，状态会反映这个已完成的杠。
-            return False # 指示操作失败（无法摸到岭上牌）
+            return False  # 指示操作失败（无法摸到岭上牌）
 
         # 4. 将岭上牌赋值给 player.drawn_tile
         player.drawn_tile = replacement_tile
@@ -494,14 +560,14 @@ class GameState:
         # --- 5. 翻开新的杠宝牌指示牌 (Kan Dora) ---
         # Requires self.wall instance in GameState
         # 在摸取岭上牌后翻开
-        self.wall.reveal_new_dora() # 需要 Wall.reveal_new_dora()
+        self.wall.reveal_new_dora()  # 需要 Wall.reveal_new_dora()
         print("翻开新的杠宝牌指示牌。")
 
         # --- 6. 清除所有玩家的一发状态 ---
         # 杠牌会打破所有玩家的一发机会
         print("清除所有玩家的一发机会。")
-        for p in self.players: # 遍历 GameState 中的所有玩家
-             p.ippatsu_chance = False
+        for p in self.players:  # 遍历 GameState 中的所有玩家
+            p.ippatsu_chance = False
 
         # --- 7. 检查是否因四杠导致流局 (在 apply_action 中完成) ---
         # check_four_kan_abortive_draw 在 _perform_kan 返回成功后，在 apply_action 中调用。
@@ -509,6 +575,7 @@ class GameState:
         # 如果所有关键步骤都成功完成 (移除牌，更新副露，摸到岭上牌，翻开宝牌，清除一发)
         print(f"玩家 {player.player_index} 的杠操作成功执行。")
         return True
+
     # --- 新的辅助方法：验证响应阶段声明的动作 ---
     def _is_response_action_valid(
         self, game_state: "GameState", player_index: int, action: "Action"
@@ -557,9 +624,7 @@ class GameState:
             # TODO: 根据动作类型添加更多详情，例如 RON 需要放铳玩家索引
         }
         # ----------------------------------------------------
-        combined_hand = list(player.hand)  # 创建手牌的副本
-        if player.drawn_tile:
-            combined_hand.append(player.drawn_tile)  # 将摸到的牌添加到副本中
+
         # --- 2. 验证当前玩家回合 (通用验证) ---
         # 在响应阶段 (WAITING_FOR_RESPONSE)，current_player_index 表示轮到谁声明响应，这个检查是必要的
         # 在其他阶段，current_player_index 表示轮到谁行动，这个检查也是必要的
@@ -628,6 +693,9 @@ class GameState:
 
                 # 尝试检查手牌本身是否构成国士无双十三面听之类的特殊自摸
                 # 这是复杂情况，暂时简化处理：如果没有 drawn_tile 且手牌不构成和牌型，则视为无效
+                combined_hand = list(player.hand)  # 创建手牌的副本
+                if player.drawn_tile:
+                    combined_hand.append(player.drawn_tile)  # 将摸到的牌添加到副本中
                 if not self.rules_engine.check_win(combined_hand, player.melds):
                     print("错误: 手牌不构成和牌型，自摸无效。")
                     # TODO: 返回无效动作信号 / 抛出错误
@@ -704,7 +772,7 @@ class GameState:
                     # 它应该返回是否成功 (例如，岭上牌是否摸到)
                     # 将正确的 KanType 枚举值传递给 _perform_kan
                     kan_successful = self._perform_kan(
-                        player:PlayerState,action:Action 
+                        player, action
                     )  # <--- 传递 KanType 枚举值
 
                     if not kan_successful:

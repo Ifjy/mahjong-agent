@@ -281,7 +281,7 @@ class RulesEngine:
         # 玩家手牌+摸牌中是否有 4 张相同的 Tile 对象
         # 使用 Counter 统计每种 Tile (考虑赤牌) 的数量
         tile_counts: TypingCounter[Tile] = Counter(full_hand_tiles)
-
+        # todo 查看 红宝牌的影响
         for (
             tile_object,
             count,
@@ -330,11 +330,7 @@ class RulesEngine:
                 matching_tile_in_hand_or_drawn: Optional[Tile] = None
                 for tile in full_hand_tiles:
                     # 检查数值和花色是否匹配碰牌
-                    # 假设 Tile 有 suit 属性
-                    if (
-                        tile.value == pon_tile_value
-                        and tile.suit == meld["tiles"][0].suit
-                    ):
+                    if tile.value == pon_tile_value:
                         matching_tile_in_hand_or_drawn = (
                             tile  # 找到那张可以加杠的牌对象
                         )
@@ -379,11 +375,58 @@ class RulesEngine:
     # TODO: Ensure ActionType has PON.
     # TODO: Ensure KanType has CLOSED and ADDED.
 
-    def _find_self_open_kans(
+    def _find_open_kans_response(
         self, player: PlayerState, game_state: GameState
     ) -> List[Action]:
-        """查找玩家在自己回合可以进行的明杠"""
-        # 明杠 (Daiminkan) 必须使用 摸到的牌(drawn_tile) 或者 手牌中的一张(hand) 来加到已有的碰(meld)上
+        """查找玩家对最后一张弃牌可以进行的明杠 (Daiminkan)"""
+        open_kan_actions: List[Action] = []
+
+        # 明杠是对最后一张弃牌的响应动作
+        last_discarded_tile = game_state.last_discarded_tile
+        if last_discarded_tile is None:
+            return open_kan_actions  # 没有弃牌，不能明杠
+
+        discarder_index = game_state.last_discard_player_index
+        if discarder_index is None or player.player_index == discarder_index:
+            return open_kan_actions  # 玩家不能杠自己的弃牌 (除非特殊规则，通常不是明杠)
+
+        # --- 检查玩家手牌是否满足明杠条件 ---
+        # 玩家手牌中需要有 3 张牌，与被弃牌数值和花色相同（允许混合红/普通牌）
+        # 这些牌将与被弃牌一起构成 4 张的明杠副露
+
+        target_value = last_discarded_tile.value
+        # 查找玩家 HAND (不是手牌+摸牌) 中与弃牌数值和花色匹配的牌
+        matching_hand_tiles = [
+            t for t in player.hand if t.value == target_value  # 检查数值和花色
+        ]
+
+        # 玩家需要至少 3 张这样的牌在手牌中
+        if len(matching_hand_tiles) >= 3:
+            # 可以进行明杠。需要选择 3 张具体的牌对象与弃牌构成副露。
+            # 如果手牌中有超过 3 张匹配的牌（例如 4 张），也只需要用其中 3 张。
+            # 规则通常不指定具体用哪 3 张，只要是符合数值花色的即可。
+            # 简单起见，选择找到的前 3 张匹配的牌对象。
+            tiles_from_hand_for_meld = matching_hand_tiles[:3]
+            # 创建构成明杠副露的 Tile 对象列表：被弃牌 + 手牌中的 3 张
+            open_kan_meld_tiles = [last_discarded_tile] + tiles_from_hand_for_meld
+            # 创建 Action 对象，包含构成杠的具体 Tile 对象列表
+            open_kan_actions.append(
+                Action(
+                    type=ActionType.KAN,
+                    kan_type=KanType.OPEN,
+                    tile=last_discarded_tile,  # 响应动作通常用 tile 参数表示目标牌
+                    meld_tiles=open_kan_meld_tiles,  # <-- 包含具体的 Tile 对象列表
+                )
+            )
+
+        return open_kan_actions
+
+    # TODO: Ensure Tile has a suit attribute.
+    # TODO: Ensure ActionType has KAN.
+    # TODO: Ensure KanType has OPEN.
+    # TODO: This method should be called in generate_candidate_actions during WAITING_FOR_RESPONSE phase.
+    # TODO: Consider rules like Furiten (虽然主要影响 Ron，但理论上可能影响明杠的合法性，取决于具体规则实现)
+    # TODO: 检查玩家是否在立直状态。立直后可以明杠，但会解除门清，通常不划算且会改变听牌。
 
     def _find_riichi_discards(
         self, player: PlayerState, game_state: GameState

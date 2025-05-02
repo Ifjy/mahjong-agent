@@ -8,36 +8,43 @@ class Renderer:
 
     def _init_tile_symbols(self):
         symbols = []
+        # 万子 0-8
         for i in range(9):
             symbols.append(f"{i+1}万")
+        # 筒子 9-17
         for i in range(9):
             symbols.append(f"{i+1}筒")
+        # 索子 18-26
         for i in range(9):
             symbols.append(f"{i+1}索")
+        # 字牌 27-33
         symbols.extend(["东", "南", "西", "北", "白", "发", "中"])
-        return symbols
+        return symbols  # 共 34 个符号，索引 0-33
 
     def _get_tile_string(self, tile: Tile) -> str:
-        """将 Tile 对象渲染成字符串 (例如 '1m', '5pr')"""
+        """
+        将 Tile 对象渲染成字符串 (例如 '1万', '5筒r', '东')
+        这个方法只负责根据 tile 的 value 和 is_red 属性生成基础字符串。
+        是否是宝牌的标记 ('d') 将在渲染时根据当前宝牌列表额外添加。
+        """
         if tile is None:
-            return "???"  # 或者其他表示空牌的符号
-            # 检查 tile 对象是否有 'value' 属性
+            return "???"
+
         if not hasattr(tile, "value"):
-            # 如果 tile 没有 value 属性，返回一个错误指示字符串
             return f"InvalidTile({type(tile).__name__})"
+
         tile_value = tile.value
         if (
             not isinstance(tile_value, int)
             or tile_value < 0
             or tile_value >= len(self._tile_symbols)
         ):
-            # 如果 value 不是一个有效的整数索引，或者超出了列表范围，
-            # 返回一个错误指示字符串，表明该牌值无法找到对应符号
             return f"UnknownValue({tile_value})"
-        # 确保 tile.value 在 _tile_symbols 中，或者提供一个回退
+
         base_symbol = self._tile_symbols[tile_value]
+        # 假设 Tile 对象有 is_red 属性来表示是否是红宝牌实例
         is_red = getattr(tile, "is_red", False)
-        # 假设 Tile 对象有 is_red 属性
+        # 只在这里添加 'r'，不添加 'd'
         return base_symbol + ("r" if is_red else "")
 
     def render_action_to_string(self, action: Action, player_idx: int = -1) -> str:
@@ -45,34 +52,31 @@ class Renderer:
         # player_idx 是可选的，用于添加 "玩家X" 前缀
         player_prefix = f"玩家{player_idx} " if player_idx != -1 else ""
 
-        action_type = action.type  # 假设 Action 对象有 type 属性
+        # 这里使用 _get_tile_string，它不包含 'd' 标记，这是符合动作描述语境的
+        # 比如 "玩家1 打出 5筒r" 比 "玩家1 打出 5筒rd" 更自然
+        action_type = action.type
 
         if action_type == ActionType.DISCARD:
-            # 假设 Action 对象有 tile 属性
             tile = action.tile
             return f"{player_prefix}打出 {self._get_tile_string(tile)}"
 
         elif action_type == ActionType.RIICHI:
-            # 假设 Riichi Action 对象有 riichi_discard 属性
             riichi_tile = action.riichi_discard
             return f"{player_prefix}立直 打出 {self._get_tile_string(riichi_tile)}"
 
         elif action_type == ActionType.CHI:
-            # 假设 Chi Action 对象有 chi_tiles 和 tile 属性
             chi_tiles = action.chi_tiles
-            target_tile = action.tile  # 被吃的那张
+            target_tile = action.tile
             chi_str = " ".join(self._get_tile_string(t) for t in chi_tiles)
             return (
                 f"{player_prefix}吃 {self._get_tile_string(target_tile)}，用 {chi_str}"
             )
 
         elif action_type == ActionType.PON:
-            # 假设 Pon Action 对象有 tile 属性
             tile = action.tile
             return f"{player_prefix}碰 {self._get_tile_string(tile)}"
 
         elif action_type == ActionType.KAN:
-            # 假设 Kan Action 对象有 tile 和 kan_type 属性
             tile = action.tile
             kan_type = action.kan_type
             if kan_type == KanType.CLOSED:
@@ -82,11 +86,10 @@ class Renderer:
             elif kan_type == KanType.ADDED:
                 kan_str = "加杠"
             else:
-                kan_str = "杠"  # 未知类型
+                kan_str = "杠"
             return f"{player_prefix}{kan_str} {self._get_tile_string(tile)}"
 
         elif action_type == ActionType.TSUMO:
-            # 假设 Tsumo Action 对象有 winning_tile 属性
             winning_tile = action.winning_tile
             if winning_tile:
                 return f"{player_prefix}自摸 {self._get_tile_string(winning_tile)}"
@@ -94,7 +97,6 @@ class Renderer:
                 return f"{player_prefix}自摸"
 
         elif action_type == ActionType.RON:
-            # 假设 Ron Action 对象有 winning_tile 属性
             winning_tile = action.winning_tile
             if winning_tile:
                 return f"{player_prefix}荣和 {self._get_tile_string(winning_tile)}"
@@ -107,17 +109,16 @@ class Renderer:
         elif action_type == ActionType.SPECIAL_DRAW:
             return f"{player_prefix}特殊流局宣告"
 
-        # 可以添加对 DRAW 的处理（如果需要渲染摸牌动作）
+        # DRAW 动作通常只在内部处理，不作为玩家可见动作渲染
         # elif action_type == ActionType.DRAW:
-        #    tile = action.tile # 假设 Draw Action 有 tile 属性
-        #    if tile is not None:
-        #        return f"{player_prefix}摸牌 {self._get_tile_string(tile)}"
-        #    else:
-        #        return f"{player_prefix}摸牌（流局）"
+        #     tile = action.tile
+        #     if tile is not None:
+        #         return f"{player_prefix}摸牌 {self._get_tile_string(tile)}"
+        #     else:
+        #         return f"{player_prefix}摸牌（流局）"
 
         else:
-            # 对于未明确处理的动作类型，返回其默认字符串表示
-            return f"{player_prefix}{str(action)}"
+            return f"{player_prefix}{str(action)}"  # fallback
 
     def render(self, game_state, mode="human"):
         if mode == "human":
@@ -127,19 +128,31 @@ class Renderer:
         print("\n" + "=" * 50)
         wind_str = ["东", "南", "西", "北"][game_state.round_wind % 4]
         print(
-            f"场风: {wind_str}{game_state.round_number}局  本场数: {game_state.honba}  立直棒: {game_state.riichi_sticks}"
+            f"场风: {wind_str}{game_state.round_number}局   本场数: {game_state.honba}   立直棒: {game_state.riichi_sticks}"
         )
-        print(
-            f"剩余牌数: {game_state.wall.get_remaining_live_tiles_count()}"
-        )  # ✅修正方法名
+        print(f"剩余牌数: {game_state.wall.get_remaining_live_tiles_count()}")
 
+        # 渲染宝牌指示牌 (使用 _get_tile_string 处理红宝牌指示牌)
+        indicator_str = " ".join(
+            [
+                self._get_tile_string(dora_tile)
+                for dora_tile in game_state.wall.dora_indicators
+            ]
+        )
+        print(f"宝牌指示牌: {indicator_str}")
+
+        # 渲染实际宝牌，并获取实际宝牌的值集合以便后续标记
+        actual_dora_tiles = game_state.wall.get_current_dora_tiles()
         dora_str = " ".join(
             [
-                self._tile_symbols[dora_tile.value]
-                for dora_tile in game_state.wall.dora_indicators
-            ]  # ✅使用.value
+                self._get_tile_string(dora_tile) for dora_tile in actual_dora_tiles
+            ]  # 这里也使用 _get_tile_string
         )
-        print(f"宝牌指示牌: {dora_str}")
+        print(f"当前宝牌: {dora_str}")
+
+        # 为了快速判断一张牌是否是宝牌，创建一个实际宝牌值的集合
+        # 注意：这里只需要 value，因为宝牌是按值确定的，不区分红色普通
+        dora_values = {tile.value for tile in actual_dora_tiles}
 
         current_player = game_state.current_player_index
         for i, player in enumerate(game_state.players):
@@ -154,50 +167,80 @@ class Renderer:
 
             print(f"\n{is_current}{position} {status_str} 得分: {player.score}")
 
+            # --- 渲染手牌 ---
             if player.hand:
-                hand_str = " ".join(
-                    [self._tile_symbols[tile.value] for tile in sorted(player.hand)]
-                )
+                hand_parts = []
+                # 排序手牌并添加dora标记
+                # 遍历 sorted(player.hand) 确保按规则排序
+                for tile in sorted(player.hand):
+                    tile_str = self._get_tile_string(
+                        tile
+                    )  # 获取基础字符串 (含 'r' 如果是红宝牌)
+                    if tile.value in dora_values:
+                        tile_str += "d"  # 如果是宝牌，添加 'd' 标记
+                    hand_parts.append(tile_str)
+
+                hand_str = " ".join(hand_parts)
+
+                # 渲染摸牌并添加dora标记
                 if player.drawn_tile is not None:
-                    hand_str += f" + [{self._tile_symbols[player.drawn_tile.value]}]"
+                    drawn_tile_str = self._get_tile_string(player.drawn_tile)
+                    if player.drawn_tile.value in dora_values:
+                        drawn_tile_str += "d"  # 如果是宝牌，添加 'd' 标记
+                    hand_str += f" + [{drawn_tile_str}]"  # 将摸到的牌单独括起来
+
                 print(f"手牌: {hand_str}")
 
+            # --- 渲染副露 ---
             if player.melds:
                 melds_str = []
                 for meld in player.melds:
-                    tiles_str = " ".join(
-                        [self._tile_symbols[tile.value] for tile in meld["tiles"]]
-                    )
-                    melds_str.append(f"[{tiles_str}]")
+                    meld_parts = []
+                    # 渲染副露中的牌并添加dora标记
+                    for tile in meld["tiles"]:  # meld["tiles"] 应该是一个 Tile 列表
+                        tile_str = self._get_tile_string(tile)
+                        if tile.value in dora_values:
+                            tile_str += "d"  # 如果是宝牌，添加 'd' 标记
+                        meld_parts.append(tile_str)
+                    melds_str.append(
+                        f"[{' '.join(meld_parts)}]"
+                    )  # 副露通常用方括号括起来
                 print(f"副露: {' '.join(melds_str)}")
 
+            # --- 渲染牌河 ---
             if player.discards:
-                discard_str = " ".join(
-                    [self._tile_symbols[tile.value] for tile in player.discards]
-                )
+                discard_parts = []
+                # 渲染牌河中的牌并添加dora标记
+                for tile in player.discards:  # player.discards 应该是一个 Tile 列表
+                    tile_str = self._get_tile_string(tile)
+                    if tile.value in dora_values:
+                        tile_str += "d"  # 如果是宝牌，添加 'd' 标记
+                    discard_parts.append(tile_str)
+                discard_str = " ".join(discard_parts)
                 print(f"牌河: {discard_str}")
 
-        if game_state.last_action_info:
-            print("\n最后动作:", end=" ")
+            # 最后动作的渲染不加 'd' 标记，因为它描述的是动作本身，不是牌的状态
+            # 比如 "玩家1 打出 5筒r" 清楚说明了打出的是红宝牌
+            # 如果加上 'd' 会变成 "玩家1 打出 5筒rd" 语义上稍显重复
+            # 如果需要，可以自行修改 render_action_to_string，但这里保持原样
+            if game_state.last_action_info:
+                print("\n最后动作:", end=" ")
+                action_type = game_state.last_action_info.get("type")
+                player_idx = game_state.last_action_info.get("player")
+                action_obj = game_state.last_action_info.get("action_obj")
 
-            action_type = game_state.last_action_info.get("type")
-            player_idx = game_state.last_action_info.get("player")
-            action_obj = game_state.last_action_info.get("action_obj")
+                if action_obj is None:
+                    print(str(game_state.last_action_info))
+                elif action_obj is not None and player_idx is not None:
+                    # render_action_to_string 内部调用 _get_tile_string，不含 'd' 标记
+                    last_action_str = self.render_action_to_string(
+                        action_obj, player_idx
+                    )
+                    print(last_action_str)
+                else:
+                    print(str(game_state.last_action_info))
 
-            if action_obj is None:
-                print(str(game_state.last_action_info))
                 print("=" * 50 + "\n")
-                return
-
-            if action_obj is not None and player_idx is not None:
-                # 直接调用渲染方法
-                last_action_str = self.render_action_to_string(action_obj, player_idx)
-                print(last_action_str)
-            else:
-                # 如果信息不全，打印原始信息作为回退
-                print(str(game_state.last_action_info))
-
-            print("=" * 50 + "\n")
 
     def close(self):
         pass
