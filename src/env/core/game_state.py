@@ -429,6 +429,7 @@ class GameState:
             return False
 
     def apply_action(self, action: Action, player_index: int):
+        # todo 很多辅助函数还没有实现 另外 副露注意要修改门清状态哦 不然都可以立直、
         """
         应用玩家执行的动作并更新游戏状态。
         """
@@ -642,6 +643,7 @@ class GameState:
 
                 # --- 验证立直合法性 (使用 RulesEngine) ---
                 # validate_riichi 应该检查玩家是否门清、听牌、点数足够等，并可能需要打出的牌来检查振听
+                #!! 这里的validate ricchi还没有实现
                 can_declare_riichi = self.rules_engine.validate_riichi(
                     self, player_index, tile_to_discard_for_riichi
                 )  # Assuming validate_riichi takes game_state, player_index, tile
