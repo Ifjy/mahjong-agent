@@ -1180,26 +1180,6 @@ class GameState:
             return self.players[player_index]
         return None
 
-    def is_hand_over(self) -> bool:
-        """检查当前局是否已结束"""
-        return self._hand_over_flag
-
-    def is_game_over(self) -> bool:
-        """检查整场游戏是否已结束"""
-        # 可以添加更复杂的结束条件，如分数低于0 (飞了)
-        if not self._game_over_flag:  # 避免重复检查
-            # 检查是否完成预定场数 (例如，假设打南风场，南4局结束)
-            if self.round_wind > 1:  # 假设 0=东, 1=南
-                # 且当前不是刚开始南1局 (防止南1局直接结束)
-                # 这个逻辑可以更精确，例如检查 self.round_number 是否完成
-                self._game_over_flag = True
-            # 检查是否有人被飞 (分数<0)
-            # for p in self.players:
-            #     if p.score < 0:
-            #         self._game_over_flag = True
-            #         break
-        return self._game_over_flag
-
     # --- 更新分数和推进游戏的方法 (由环境调用) ---
     def update_scores(self, score_changes: Dict[int, int]):
         """根据计算结果更新玩家分数"""

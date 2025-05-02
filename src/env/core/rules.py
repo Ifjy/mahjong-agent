@@ -1380,3 +1380,5 @@ class RulesEngine:
 
     # TODO: 实现 _is_furiten (振听检查)
     # def _is_furiten(...) -> bool: ...
+
+    def determine_next_hand_state(self,game_state: "GameState",hand_outcome_info: Dict[str, Any])
