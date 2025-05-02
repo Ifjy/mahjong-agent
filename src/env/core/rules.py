@@ -1579,3 +1579,21 @@ class RulesEngine:
 
         print(f"Debug Next State: Calculated next hand state: {next_hand_state}")
         return next_hand_state
+
+    def valid_closed_kan(self, player: PlayerState, tile_to_kan: Tile) -> bool:
+        """
+        检查玩家是否可以进行暗杠 (Closed Kan)。
+
+        Args:
+            player: 玩家状态对象。
+            tile: 需要检查的牌。
+            melds: 玩家当前的副露列表。
+
+        Returns:
+            bool: 如果可以进行暗杠，返回 True；否则返回 False。
+        """
+        # 暗杠需要玩家手中有4张相同的牌
+        combined_hand = player.hand + player.drawn_tile
+        if combined_hand.count(tile_to_kan) == 4:
+            return True
+        return False

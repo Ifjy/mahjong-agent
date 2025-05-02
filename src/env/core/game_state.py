@@ -396,6 +396,170 @@ class GameState:
         # 不应该到达这里
         return False
 
+    # --- 辅助方法：执行合法的杠动作的状态变更 ---
+    def _perform_kan(
+        self, player: "PlayerState", tile_to_kan: "Tile", kan_type: "KanType"
+    ) -> bool:
+        """
+        执行合法的杠动作的状态变更 (移牌、摸岭上、翻宝牌等)。
+        在 apply_action 中验证杠合法性后调用。
+
+        Args:
+            player: 执行杠动作的玩家状态对象。
+            tile_to_kan: 构成杠的关键牌。
+                         - 对于 KanType.CLOSED (暗杠)，这是四张相同牌中的任意一张。
+                         - 对于 KanType.ADDED (加杠)，这是加到碰牌上的那张手牌。
+            kan_type: 杠的类型 (KanType.CLOSED 或 KanType.ADDED)。KanType.OPEN 在 _apply_winning_response 中处理。
+
+        Returns:
+            True 如果杠操作成功完成 (包括成功摸到岭上牌)，
+            False 如果因杠尾无牌等原因导致操作未能完全成功 (这通常会引发流局)。
+        """
+        print(
+            f"执行杠操作: 玩家 {player.player_index}, 类型: {kan_type.name}, 牌: {tile_to_kan}"
+        )
+
+        tiles_to_remove_from_hand: List["Tile"] = []  # 需要从手牌中移除的牌列表
+        kan_meld_tiles: List["Tile"] = []  # 用于构成新副露的牌列表
+        target_meld_for_added_kan = None  # 加杠时找到的目标碰副露
+
+        # --- 1. 确定要移除的牌和副露的牌，并从手牌移除 ---
+        if kan_type == KanType.CLOSED:
+            # 暗杠 (Ankan): 从手牌移除 4 张相同的牌
+            # 验证方法已确保手牌中有 4 张与 tile_to_kan 相等的牌。
+            # _remove_tiles_from_hand 会精确移除这些牌。
+            tiles_to_remove_from_hand = [
+                tile_to_kan
+            ] * 4  # 告诉移除方法要移除哪些牌 (4张匹配的)
+
+            # 优化：先从手牌中找到这 4 张牌对象，用于构建副露，再移除
+            # 这依赖于 _remove_tiles_from_hand 能根据对象正确移除
+            temp_hand_copy = list(player.hand)  # 临时复制手牌用于查找
+            count_found = 0
+            for hand_tile in temp_hand_copy:
+                if hand_tile == tile_to_kan and count_found < 4:
+                    kan_meld_tiles.append(hand_tile)  # 收集用于副露的牌对象
+                    count_found += 1
+
+            if count_found != 4:
+                # 这通常不应发生如果 RulesEngine 验证正确
+                print(
+                    f"内部错误: 暗杠前未能从手牌中找到 4 张匹配的牌 {tile_to_kan}。手牌: {player.hand}"
+                )
+                return False  # 查找失败，杠操作失败
+
+            # 使用辅助方法从玩家手牌中移除找到的这 4 张牌对象
+            # _remove_tiles_from_hand 返回 True/False 表示是否成功移除
+            if not self._remove_tiles_from_hand(
+                player, kan_meld_tiles
+            ):  # 直接传入找到的对象列表进行移除
+                # 如果移除失败，_remove_tiles_from_hand 内部应该打印错误
+                print(f"内部错误: 玩家 {player.player_index} 暗杠时移除牌失败。")
+                return False  # 移除失败，杠操作失败
+
+            # 移除成功，kan_meld_tiles 已经是用于副露的牌列表
+
+        elif kan_type == KanType.ADDED:
+            # 加杠 (Kakan/Shouminkan): 从手牌移除 1 张牌，添加到已有的碰副露上
+            tile_to_remove_from_hand = tile_to_kan  # 要从手牌移除并加杠的牌
+
+            # 找到可以进行加杠的现有碰副露
+            # 遍历玩家的副露列表，查找匹配的碰牌副露
+            for meld in player.melds:
+                # 检查是否是碰牌副露 (ActionType.PON)，牌数量为 3，且副露的牌与要加杠的牌数值相同
+                # 并且玩家手牌中确实有要加杠的这张牌 (即使验证已做，这里也安全检查一下)
+                if (
+                    meld["type"] == ActionType.PON
+                    and len(meld["tiles"]) == 3
+                    and meld["tiles"][0].value == tile_to_kan.value
+                    and tile_to_kan in player.hand
+                ):
+                    target_meld_for_added_kan = meld
+                    break  # 找到目标副露
+
+            if not target_meld_for_added_kan:
+                # 这通常不应发生如果 RulesEngine 验证正确
+                print(
+                    f"内部错误: 玩家 {player.player_index} 尝试加杠 {tile_to_kan} 但找不到匹配的碰副露或手牌中没有此牌。手牌: {player.hand}, 副露: {player.melds}"
+                )
+                return False  # 找不到目标副露或手牌没有牌，加杠失败
+
+            # 使用辅助方法从玩家手牌中移除要加杠的那张牌
+            if not self._remove_tiles_from_hand(player, [tile_to_remove_from_hand]):
+                # 如果移除失败，_remove_tiles_from_hand 内部应该打印错误
+                print(
+                    f"内部错误: 玩家 {player.player_index} 加杠时移除牌失败 {tile_to_remove_from_hand}。"
+                )
+                return False  # 移除失败，加杠操作失败
+
+            # 移除成功，tile_to_remove_from_hand 是用于添加到副露的牌
+
+        # --- 2. 如果是成功移除牌，则更新副露 ---
+        if kan_type == KanType.CLOSED:
+            # 创建新的暗杠副露并添加到玩家副露列表
+            # kan_meld_tiles 已经在上面收集好了
+            player.melds.append({"type": KanType.CLOSED, "tiles": kan_meld_tiles})
+            print(f"玩家 {player.player_index} 完成暗杠，副露: {player.melds[-1]}")
+
+        elif kan_type == KanType.ADDED:
+            # 更新目标碰副露：修改类型为 KanType.ADDED，并添加加杠的牌
+            target_meld_for_added_kan["type"] = KanType.ADDED
+            target_meld_for_added_kan["tiles"].append(
+                tile_to_remove_from_hand
+            )  # 将移除的那张牌添加到副露
+            # Optional: Re-sort the tiles in the meld if you want consistent representation
+            # target_meld_for_added_kan["tiles"].sort(...)
+            print(
+                f"玩家 {player.player_index} 完成加杠，副露更新: {target_meld_for_added_kan}"
+            )
+
+        # --- 3. 从杠尾 (死牌区) 摸一张岭上牌 (rinshan pai) ---
+        # Requires self.wall instance in GameState
+        replacement_tile = (
+            self.wall.draw_replacement_tile()
+        )  # 需要 Wall.draw_replacement_tile() -> Optional[Tile]
+
+        if replacement_tile is None:
+            # 杠尾没有牌了，导致流局 (四杠散了或牌墙摸完的一种特殊情况)
+            print("杠尾无牌，无法摸取岭上牌！")
+            # 返回 False 信号给 apply_action，由 apply_action 处理流局转换
+            # 在这种情况下，牌已经从手牌移出并形成副露，但没有摸到岭上牌。
+            # 游戏进入流局状态。
+            # 这里返回 False，由 apply_action 调用 _transition_to_abortive_draw
+            return False  # Indicate failure (no replacement tile)
+
+        # 4. 将岭上牌赋值给 player.drawn_tile
+        player.drawn_tile = replacement_tile
+        print(f"玩家 {player.player_index} 摸得岭上牌: {replacement_tile}")
+
+        # --- 5. 翻开新的杠宝牌指示牌 (Kan Dora) ---
+        # Requires self.wall instance in GameState
+        # 在摸取岭上牌后翻开
+        self.wall.reveal_new_dora()  # 需要 Wall.reveal_new_dora()
+        print("翻开新的杠宝牌指示牌。")
+
+        # --- 6. 清除所有玩家的一发状态 ---
+        # 杠牌会打破所有玩家的一发机会
+        print("清除所有玩家的一发机会。")
+        for p in self.players:  # 遍历 GameState 中的所有玩家
+            p.ippatsu_chance = False
+
+        # --- 7. 检查是否因四杠导致流局 (通常在 apply_action 中完成) ---
+        # 四杠散了的检查通常在 _perform_kan 返回成功后，在 apply_action 中进行，
+        # 因为 RulesEngine 需要访问整个 game_state 来计算总杠数。
+
+        # 如果所有关键步骤都成功完成 (移除牌，更新副露，摸到岭上牌，翻开宝牌，清除一发)
+        print(f"玩家 {player.player_index} 的杠操作成功执行。")
+        return True
+
+    # TODO: 确保 _remove_tiles_from_hand 辅助方法正确实现，返回 True/False
+    # TODO: 确保 Wall 类有 draw_replacement_tile() -> Optional[Tile] 方法
+    # TODO: 确保 Wall 类有 reveal_new_dora() 方法
+    # TODO: 确保 PlayerState 类有 melds: List[Dict] 或 List[Meld] 属性 (melds 中的每个元素是 Dict)
+    # TODO: 确保 ActionType 有 PON 的枚举值
+    # TODO: 确保 KanType 有 CLOSED 和 ADDED 的枚举值
+    # TODO: 确保 Tile 类正确实现了 __eq__ 和 __hash__ (如果 dataclass(frozen=True) 已做则无需额外实现)
+
     # --- 新的辅助方法：验证响应阶段声明的动作 ---
     def _is_response_action_valid(
         self, game_state: "GameState", player_index: int, action: "Action"
@@ -444,7 +608,9 @@ class GameState:
             # TODO: 根据动作类型添加更多详情，例如 RON 需要放铳玩家索引
         }
         # ----------------------------------------------------
-
+        combined_hand = list(player.hand)  # 创建手牌的副本
+        if player.drawn_tile:
+            combined_hand.append(player.drawn_tile)  # 将摸到的牌添加到副本中
         # --- 2. 验证当前玩家回合 (通用验证) ---
         # 在响应阶段 (WAITING_FOR_RESPONSE)，current_player_index 表示轮到谁声明响应，这个检查是必要的
         # 在其他阶段，current_player_index 表示轮到谁行动，这个检查也是必要的
@@ -510,20 +676,13 @@ class GameState:
 
                 # --- 验证自摸合法性 (使用 RulesEngine) ---
                 # 注意：check_win 方法不能修改玩家状态！应传入手牌+摸牌的临时组合
-                combined_hand = list(player.hand)  # 创建手牌的副本
-                if player.drawn_tile:
-                    combined_hand.append(player.drawn_tile)  # 将摸到的牌添加到副本中
-                else:
-                    # 没有摸牌就宣布自摸？通常是无效的，除非是特殊情况（如岭上开花时摸到的牌被移走）
-                    print(
-                        f"警告: 玩家 {player_index} 在没有 drawn_tile 时尝试宣布 Tsumo。"
-                    )
-                    # 尝试检查手牌本身是否构成国士无双十三面听之类的特殊自摸
-                    # 这是复杂情况，暂时简化处理：如果没有 drawn_tile 且手牌不构成和牌型，则视为无效
-                    if not self.rules_engine.check_win(combined_hand, player.melds):
-                        print("错误: 手牌不构成和牌型，自摸无效。")
-                        # TODO: 返回无效动作信号 / 抛出错误
-                        return  # 无效自摸
+
+                # 尝试检查手牌本身是否构成国士无双十三面听之类的特殊自摸
+                # 这是复杂情况，暂时简化处理：如果没有 drawn_tile 且手牌不构成和牌型，则视为无效
+                if not self.rules_engine.check_win(combined_hand, player.melds):
+                    print("错误: 手牌不构成和牌型，自摸无效。")
+                    # TODO: 返回无效动作信号 / 抛出错误
+                    return  # 无效自摸
 
                 # 调用 RulesEngine 检查是否满足和牌条件，win_info 包含和牌详情
                 win_info = self.rules_engine.check_win(
