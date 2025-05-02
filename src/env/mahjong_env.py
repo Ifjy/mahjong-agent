@@ -101,15 +101,17 @@ class MahjongEnv(gym.Env):
                 self.game_state
             )  # 假设 RulesEngine 有此方法
 
-            # TODO: 根据本局结果计算玩家点数变动
-            # 需要 RulesEngine 提供方法计算点数变化列表 {player_index: score_change}
-            score_changes = self.rules_engine.calculate_yaku_and_score(
-                self.game_state, hand_outcome_info
-            )  # 假设 RulesEngine 有此方法
-
+            # # TODO: 根据本局结果计算玩家点数变动
+            # # 需要 RulesEngine 提供方法计算点数变化列表 {player_index: score_change}
+            # score_changes = self.rules_engine.calculate_yaku_and_score(
+            #     self.game_state, hand_outcome_info
+            # )  # 假设 RulesEngine 有此方法
+            # get hand outcome 中会调用函数calculate_yaku_and_score计算。 同时中间会有字段 score_changes 记录点数变动。
             # TODO: 应用点数变动到玩家分数
             # 需要 GameState 提供方法更新玩家分数
-            self.game_state.update_scores(score_changes)  # 假设 GameState 有此方法
+            self.game_state.update_scores(
+                hand_outcome_info["score_changes"]
+            )  # 假设 GameState 有此方法
 
             # TODO: 根据本局结果确定下一局的场风、局数、本场数、立直棒和庄家
             # 需要 RulesEngine 提供方法确定下一局的状态信息
@@ -146,17 +148,6 @@ class MahjongEnv(gym.Env):
             terminated = False  # 整场游戏当然也未结束
             return observation, reward, terminated, False, info
 
-    # TODO: 需要在 GameState 中添加用于追踪整场游戏状态的属性，例如
-    # game_state.round_wind (场风，如东、南)
-    # game_state.round_number (局数，如东1局、东2局)
-    # game_state.honba (本场数)
-    # game_state.riichi_sticks (场上立直棒数量)
-    # game_state.dealer_index (当前庄家索引)
-    # 这些属性需要在 game_state.reset_new_hand 中根据下一局的状态信息进行设置
-
-    # TODO: GameState 需要提供 update_scores(score_changes) 和 apply_next_hand_state(next_hand_state_info) 方法
-    # TODO: RulesEngine 需要提供 get_hand_outcome(game_state), calculate_hand_scores(game_state, outcome), determine_next_hand_state(game_state, outcome), is_game_over(game_state) 等方法
-
     def _get_observation(self):
         """获取编码后的观察状态，包含候选动作信息"""
         return self.state_encoder.encode(
@@ -174,7 +165,6 @@ class MahjongEnv(gym.Env):
             player_index=self.game_state.current_player_index,  # <-- 添加了 player_index 参数
         )
         # -----------------------------
-
         # 生成动作掩码
         self.action_mask = np.zeros(self.max_candidates, dtype=np.int8)
         valid_count = min(len(self.current_candidates), self.max_candidates)

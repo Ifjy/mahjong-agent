@@ -18,6 +18,20 @@ import itertools  # 可能用于组合生成
 from .actions import Action, ActionType, Tile, KanType
 from .game_state import GamePhase, PlayerState, Meld, Wall, GameState
 
+# 确保定义场风索引常量，这些常量本身可以是固定的
+ROUND_WIND_EAST = 0
+ROUND_WIND_SOUTH = 1
+ROUND_WIND_WEST = 2
+ROUND_WIND_NORTH = 3
+
+# 定义游戏长度字符串到最大场风索引的映射
+GAME_LENGTH_MAX_WIND = {
+    "tonpuusen": ROUND_WIND_EAST,  # 东风场结束在东风场打完
+    "hanchan": ROUND_WIND_SOUTH,  # 半庄结束在南风场打完
+    "issousen": ROUND_WIND_NORTH,  # 一庄结束在北风场打完
+    # 根据你需要支持的游戏长度调整
+}
+
 
 class RulesEngine:
     """
@@ -33,6 +47,43 @@ class RulesEngine:
             config (dict, optional): 用于配置规则变体 (例如赤牌规则, 食断规则等)。
         """
         self.config = config or {}
+        # 建议从一个嵌套的 game_rules 字典中获取规则参数，使配置结构清晰
+        game_rules_config = self.config.get("game_rules", {})
+
+        # --- 加载游戏流程和结束条件相关的配置 ---
+
+        # 每个场风的局数上限
+        self.max_hands_per_wind_cfg: int = game_rules_config.get(
+            "max_hands_per_wind", 4
+        )
+
+        # 整场游戏结束的最小分数阈值 (飞了)
+        self.min_game_end_score_cfg: int = game_rules_config.get(
+            "min_game_end_score", 0
+        )
+
+        # 根据游戏长度字符串确定最大场风索引
+        game_length_str = game_rules_config.get(
+            "game_length", "hanchan"
+        ).lower()  # 默认为半庄
+        self.max_round_wind_index_cfg: int = GAME_LENGTH_MAX_WIND.get(
+            game_length_str, GAME_LENGTH_MAX_WIND["hanchan"]
+        )  # 如果配置中的字符串无效，也默认为半庄
+
+        # 最大连庄数终止 (八连庄终止)
+        self.max_consecutive_dealer_wins_cfg: Optional[int] = game_rules_config.get(
+            "max_consecutive_dealer_wins", None
+        )
+
+        # 是否允许和了止め (南四局庄家点数第一且和牌/流局听牌时选择结束游戏)
+        self.allow_agari_yame_cfg: bool = game_rules_config.get(
+            "allow_agari_yame", False
+        )
+
+        # 终局点数上限 (达到此点数后游戏结束)
+        self.score_threshold_game_end_cfg: Optional[int] = game_rules_config.get(
+            "score_threshold_game_end", None
+        )
         # 幺九牌集合 (Tile.value) - 用于国士无双等判断
         # 0-8: 万, 9-17: 筒, 18-26: 索, 27:东, 28:南, 29:西, 30:北, 31:白, 32:发, 33:中
         self.terminal_honor_values: Set[int] = {0, 8, 9, 17, 18, 26} | set(
@@ -1430,302 +1481,101 @@ class RulesEngine:
     ) -> Dict[str, Any]:
         """
         根据当前游戏状态和本局结果，确定下一局的场风、局数、本场数、立直棒和庄家。
+        此函数计算理论上的下一局状态，不负责判断游戏是否实际结束。
 
         Args:
-            game_state: 当前游戏状态 (一局刚结束，分数已计算，但状态尚未为下一局准备)。
-            hand_outcome_info: RulesEngine.get_hand_outcome 返回的本局结果详情。
+            game_state: 当前游戏状态 (一局刚结束)。
+            hand_outcome_info: 本局结果详情。
 
         Returns:
             Dict[str, Any]: 包含下一局起始状态信息的字典。
-            例如：
-            {
-                "next_dealer_index": int,       # 下一任庄家索引
-                "next_round_wind": int,         # 下一场风 (使用定义的常量 ROUND_WIND_...)
-                "next_round_number": int,       # 下一局数 (1-4)
-                "next_honba": int,              # 下一本场数
-                "next_riichi_sticks": int,      # 下一局开始时场上的立直棒数量
-            }
         """
         current_dealer = game_state.dealer_index
         current_round_wind = game_state.round_wind
-        current_round_number = game_state.round_number  # 1-4
+        current_round_number = game_state.round_number
         current_honba = game_state.honba
-        current_riichi_sticks = game_state.riichi_sticks  # 这些是在场上的立直棒
-
-        next_dealer = current_dealer  # 默认下一任庄家不变 (连庄)
-        next_round_wind = current_round_wind  # 默认场风不变
-        next_round_number = current_round_number  # 默认局数不变 (如果连庄)
-        next_honba = current_honba + 1  # 默认本场数增加
-        next_riichi_sticks = 0  # 默认立直棒被赢家拿走 (如果有人和牌)
+        current_riichi_sticks = game_state.riichi_sticks
 
         end_type = hand_outcome_info.get("end_type")
-        winner_index = hand_outcome_info.get("winner_index")
-        # loser_index = hand_outcome_info.get("loser_index") # 荣和放铳者，用于点数计算，不是直接影响下一局状态
-        draw_type = hand_outcome_info.get("draw_type")  # 流局类型
-        tenpai_players = hand_outcome_info.get("tenpai_players")  # 流局时听牌玩家
+        winner_index: Optional[int] = hand_outcome_info.get("winner_index")
+        tenpai_players: Optional[List[int]] = hand_outcome_info.get("tenpai_players")
 
-        is_dealer = lambda idx: idx == current_dealer  # 辅助函数判断是否是庄家
+        # 1. 判断庄家是否轮换 (亲流れ / Renchan)
+        dealer_changes = False
+        is_win = end_type in {END_TYPE_TSUMO, END_TYPE_RON}
+        is_exhaustive_draw = end_type == END_TYPE_EXHAUSTIVE_DRAW
+        is_special_draw = end_type == END_TYPE_SPECIAL_DRAW  # 特殊流局通常连庄
 
-        # --- 判断下一局状态基于结束类型 ---
-
-        if end_type in {"TSUMO", "RON"}:  # 和牌结束
-            if is_dealer(winner_index):
-                # 庄家和牌 (自亲) -> 连庄
-                print(f"Debug Next State: 庄家 {current_dealer} 和牌，连庄。")
-                # next_dealer remains current_dealer
-                # next_round_wind remains current_round_wind
-                # next_round_number remains current_round_number
-                # next_honba already incremented by default
-                next_riichi_sticks = 0  # 立直棒归赢家 (庄家)
-
-            else:
-                # 闲家和牌 -> 庄家轮换 (亲流れ)
-                print(f"Debug Next State: 闲家 {winner_index} 和牌，庄家轮换。")
-                next_dealer = (
-                    current_dealer + 1
-                ) % game_state.num_players  # 下一家做庄
-                next_round_number = current_round_number + 1  # 局数前进
-                next_honba = 0  # 本场数重置
-                next_riichi_sticks = 0  # 立直棒归赢家 (闲家)
-                # next_round_wind remains current_round_wind ( unless final hand of round/game)
-
-        elif end_type in {"EXHAUSTIVE_DRAW"}:  # 牌墙摸完流局
-            print(f"Debug Next State: 牌墙摸完流局 ({draw_type})。")
-            dealer_was_tenpai = (
-                (current_dealer in tenpai_players)
-                if tenpai_players is not None
-                else False
+        if is_win:
+            if winner_index != current_dealer:
+                dealer_changes = True
+        elif is_exhaustive_draw:
+            dealer_is_tenpai = (
+                tenpai_players is not None and current_dealer in tenpai_players
             )
+            if not dealer_is_tenpai:
+                dealer_changes = True
+        # elif is_special_draw:
+        # 通常特殊流局是连庄，所以 dealer_changes 保持 False
 
-            if dealer_was_tenpai:
-                # 庄家听牌 -> 连庄
-                print(f"Debug Next State: 庄家 {current_dealer} 听牌，连庄。")
-                # next_dealer remains current_dealer
-                # next_round_wind remains current_round_wind
-                # next_round_number remains current_round_number
-                # next_honba already incremented by default
-                next_riichi_sticks = current_riichi_sticks  # 立直棒留在场上
+        # 2. 计算下一局状态
+        next_dealer_index: int
+        next_round_wind: int
+        next_round_number: int
+        next_honba: int
+        next_riichi_sticks: int
 
-            else:
-                # 庄家未听牌 -> 庄家轮换
-                print(f"Debug Next State: 庄家 {current_dealer} 未听牌，庄家轮换。")
-                next_dealer = (
-                    current_dealer + 1
-                ) % game_state.num_players  # 下一家做庄
-                next_round_number = current_round_number + 1  # 局数前进
-                next_honba = 0  # 本场数重置
-                next_riichi_sticks = current_riichi_sticks  # 立直棒留在场上
-                # next_round_wind remains current_round_wind ( unless final hand of round/game)
+        if dealer_changes:
+            # 庄家轮换 (亲流れ)
+            next_dealer_index = (current_dealer + 1) % self.num_players
+            next_honba = 0  # 本场数归零
 
-        elif end_type in {"SPECIAL_DRAW"}:  # 特殊流局 (九种九牌, 四风连打等)
-            print(f"Debug Next State: 特殊流局 ({draw_type})。")
-            # 特殊流局通常是庄家连庄
-            # next_dealer remains current_dealer
-            # next_round_wind remains current_round_wind
-            # next_round_number remains current_round_number
-            next_honba = current_honba + 1  # 本场数增加
-            next_riichi_sticks = current_riichi_sticks  # 立直棒留在场上
-
-        # else: # 未知结束类型，视为错误或默认流局处理？
-        #     print(f"警告: 未知本局结束类型: {end_type}")
-        #     # TODO: 处理未知结束类型，可能导致游戏错误或流局
-
-        # --- 处理场风和局数前进 (局数达到上限且庄家轮换时) ---
-        # 如果当前局数达到最大，且下一局庄家发生了变化，则场风和局数需要更新
-        # 这假设每轮场风固定 4 局 (东1到东4，南1到南4)
-        # 如果打半庄，只有东风场和南风场
-        # 如果打全庄，有东、南、西、北风场
-
-        if next_round_number > MAX_HANDS_PER_ROUND_WIND:
-            # 如果局数超过 4，并且庄家即将轮换（或者已经轮换了），则前进场风
-            # 检查是否是最后一局且庄家没连庄导致前进场风
-            if (
-                current_round_number == MAX_HANDS_PER_ROUND_WIND
-                and next_dealer != current_dealer
-            ):
-                if current_round_wind == ROUND_WIND_EAST:
-                    print("Debug Next State: 东风场结束，进入南风场。")
-                    next_round_wind = ROUND_WIND_SOUTH
-                    next_round_number = 1  # 南1局
-                elif current_round_wind == ROUND_WIND_SOUTH:
-                    print("Debug Next State: 南风场结束。")
-                    # TODO: 如果打全庄，这里进入西风场
-                    # next_round_wind = ROUND_WIND_WEST
-                    # next_round_number = 1 # 西1局
-                    # 如果打半庄，这里通常游戏结束 (由 is_game_over 判断)
-                    pass  # 让 is_game_over 处理游戏结束
-
-                # TODO: 添加西风场、北风场结束的逻辑
-
-            # 如果是庄家连庄导致局数超过 4 (例如东4局连庄)，局数和场风都不变
-            # next_round_number 会被设定回当前局数，next_round_wind 也不变
-
-        # --- 特殊情况：庄家在南四局和牌或流局听牌 (游戏是否继续取决于规则) ---
-        # 某些规则下，南四局庄家和牌或流局听牌不结束游戏，而是继续连庄直到闲家和牌或庄家流局未听牌
-        # 这个判断通常是在 is_game_over 中进行，决定游戏是否结束
-        # determine_next_hand_state 只负责计算“如果游戏继续，下一局是什么”
-        # 例如，如果南四局庄家和牌，determine_next_hand_state 计算结果是继续南四局连庄 (round_wind, round_number 不变)
-        # is_game_over 会检查是否满足“南四局庄家和牌不结束游戏”的条件
-
-        # 如果计算出的下一局局数超过了最大值（例如南四局闲家和牌导致下一局本应是南五局，但南风场只有四局）
-        # 并且场风没有前进，这通常意味着本轮场风已经打完了
-        # 我们需要处理场风前进和局数重置到 1 的情况
-        # 上面的逻辑已经处理了 next_round_number > MAX_HANDS_PER_ROUND_WIND 时的场风前进
-        # 但是如果只是普通的庄家轮换，局数也需要从 1 重新开始 (例如东1闲家和牌，下一局是东2)
-        # 修正逻辑：只有在庄家连庄时，next_round_number 才可能是 current_round_number。
-        # 在庄家轮换时，next_round_number 总是从 1 开始，除非场风前进。
-
-        # 重新思考局数和场风逻辑：
-        if next_dealer != current_dealer:  # 庄家轮换
-            next_round_number = current_round_number + 1  # 先假设局数前进
-            next_honba = 0  # 本场数重置
-
-            if current_round_number == MAX_HANDS_PER_ROUND_WIND:
-                # 如果是本轮场风的最后一局且庄家轮换，则场风前进
-                if current_round_wind == ROUND_WIND_EAST:
-                    print("Debug Next State: 东风场结束，进入南风场。")
-                    next_round_wind = ROUND_WIND_SOUTH
-                    next_round_number = 1  # 新场风从第一局开始
-                elif current_round_wind == ROUND_WIND_SOUTH:
-                    print("Debug Next State: 南风场结束。")
-                    # TODO: 如果打全庄，这里进入西风场
-                    # next_round_wind = ROUND_WIND_WEST
-                    # next_round_number = 1 # 西1局
-                    # 如果打半庄，这里游戏结束 (is_game_over 判断)
-                    pass
-                # TODO: 处理西风场、北风场结束
-
-            # 如果不是最后一局且庄家轮换 (例如东2闲家和牌，下一局是东3)，局数直接前进
-            # else: next_round_number 已经是 current_round_number + 1 了
-
-        else:  # 庄家连庄 (庄家和牌 或 流局庄家听牌 或 特殊流局)
-            # next_dealer remains current_dealer
-            # next_round_wind remains current_round_wind
-            # next_round_number remains current_round_number
-            next_honba = current_honba + 1  # 本场数增加
-
-        # 再次确保下一局的局数在 1 到 MAX_HANDS_PER_ROUND_WIND 之间，并在需要时前进场风
-        # 如果上述逻辑导致 next_round_number 越界（例如东4庄家轮换后变成了东5），
-        # 那么意味着场风应该前进了，并且下一局是新场风的第1局。
-        # 但上面的逻辑已经尝试在 next_dealer != current_dealer 且 current_round_number == MAX_HANDS_PER_ROUND_WIND 时处理了场风前进。
-        # 逻辑有点绕，简化一下：
-
-        dealer_changes = next_dealer != current_dealer
-
-        if dealer_changes:  # 庄家轮换时
-            next_honba = 0  # 本场归零
-            next_riichi_sticks = 0  # 立直棒归赢家 (如果是和牌)
-            # 如果是本轮最后一家做庄且流局未听牌，或者闲家和牌，则场风和局数前进
-            if current_dealer == (
-                self.current_round_wind * game_state.num_players
-                + MAX_HANDS_PER_ROUND_WIND
-                - 1
-            ) % (
-                game_state.num_players * (ROUND_WIND_SOUTH - ROUND_WIND_EAST + 1)
-            ) and (
-                is_non_dealer_win
-                or (
-                    is_exhaustive_draw
-                    and not (
-                        current_dealer in tenpai_players
-                        if tenpai_players is not None
-                        else False
-                    )
-                )
-            ):  # 这判断太复杂了
-                # 换个思路：检查当前是不是场风的最后一局的最后一家做庄，且该庄家轮换
-                is_final_dealer_of_round = (
-                    current_round_number == MAX_HANDS_PER_ROUND_WIND
-                    and current_dealer
-                    == (
-                        game_state.round_wind * game_state.num_players
-                        + MAX_HANDS_PER_ROUND_WIND
-                        - 1
-                    )
-                    % (game_state.num_players * MAX_HANDS_PER_ROUND_WIND)
-                )  # 过于复杂
-                # 简化判断：如果当前是 X4 局，且庄家轮换了，则场风前进
-                if current_round_number == MAX_HANDS_PER_ROUND_WIND:
-                    if current_round_wind == ROUND_WIND_EAST:
-                        print("Debug Next State: 东风场结束，进入南风场。")
-                        next_round_wind = ROUND_WIND_SOUTH
-                        next_round_number = 1  # 南1局
-                    elif current_round_wind == ROUND_WIND_SOUTH:
-                        print("Debug Next State: 南风场结束。")
-                        # TODO: 全庄进入西1
-                        next_round_wind = ROUND_WIND_WEST  # 例如
-                        next_round_number = 1
-                    # TODO: 处理西、北场风前进
-                    else:  # 当前是西或北风的第4局且庄家轮换
-                        next_round_wind = (
-                            current_round_wind + 1
-                        ) % 4  # 简单前进场风 (需要根据实际场风数量调整)
-                        next_round_number = 1
-
-                else:  # 不是 X4 局，庄家轮换，局数前进
-                    next_round_number = current_round_number + 1
-
-        else:  # 庄家连庄时 (dealer_changes is False)
-            next_honba = current_honba + 1  # 本场增加
-            next_riichi_sticks = current_riichi_sticks  # 立直棒保留
-            # 局数和场风不变
-
-        # 立直棒处理最终确认：只有和牌时立直棒归赢家，流局时立直棒保留
-        if end_type in {"TSUMO", "RON"}:
-            next_riichi_sticks = 0  # 立直棒归赢家
-
-        # 如果本局导致游戏结束 (由 is_game_over 判断)，那么这些下一局状态信息可能不会真的被用来开始新局。
-        # 但是 determine_next_hand_state 的职责就是根据规则计算出“如果游戏继续，下一局是什么”。
-
-        next_hand_state: Dict[str, Any] = {
-            "next_dealer_index": next_dealer,
-            "next_round_wind": next_round_wind,
-            "next_round_number": next_round_number,  # 应该在 1-4 之间循环
-            "next_honba": next_honba,
-            "next_riichi_sticks": next_riichi_sticks,
-        }
-
-        # 最后调整局数，确保它在 1-4 之间（如果场风没前进的话）
-        # 上面的逻辑已经尝试处理了场风前进时的局数重置
-        # 如果因为某种原因 next_round_number > 4 但场风没有前进，这可能是逻辑错误或需要更复杂的场风前进判断
-        # 确保 next_round_number 是 1-4，并且在需要时前进场风
-        # 重新简化逻辑：
-        dealer_changed = next_dealer != current_dealer
-
-        if dealer_changed:  # 庄家轮换
-            next_honba = 0  # 本场归零
-            if current_round_number == MAX_HANDS_PER_ROUND_WIND:  # X4 局结束且庄家轮换
-                next_round_number = 1  # 新场风从 1 开始
+            # 判断是否需要进风
+            if current_round_number == self.max_rounds_per_wind:
+                # 是本风最后一局，且庄家轮换 -> 进风
                 next_round_wind = (
                     current_round_wind + 1
-                )  # 场风前进 (需要根据实际场风数量调整模数)
-                # TODO: 根据实际游戏场风数量调整 next_round_wind 的计算，例如 (current_round_wind + 1) % num_round_winds
-            else:  # 非 X4 局结束，庄家轮换
-                next_round_number = current_round_number + 1  # 局数前进
-                next_round_wind = current_round_wind  # 场风不变
-        else:  # 庄家连庄 (和牌、流局听牌、特殊流局)
-            next_honba = current_honba + 1  # 本场加一
-            next_round_number = current_round_number  # 局数不变
+                )  # 暂时前进，后续可能需要检查是否超出总风数
+                next_round_number = 1  # 新的风从第一局开始
+                print(
+                    f"Debug Next State: 场风 {current_round_wind} 第 {current_round_number} 局结束，庄家轮换，进入下一场风。"
+                )
+            else:
+                # 不是本风最后一局 -> 局数前进，场风不变
+                next_round_wind = current_round_wind
+                next_round_number = current_round_number + 1
+                print(
+                    f"Debug Next State: 场风 {current_round_wind} 第 {current_round_number} 局结束，庄家轮换，进入第 {next_round_number} 局。"
+                )
+
+        else:
+            # 庄家连庄 (Renchan)
+            # (庄家和牌 / 荒牌流局且庄家听牌 / 特殊流局)
+            next_dealer_index = current_dealer
+            next_honba = current_honba + 1  # 本场数加 1
             next_round_wind = current_round_wind  # 场风不变
+            next_round_number = current_round_number  # 局数不变
+            print(
+                f"Debug Next State: 场风 {current_round_wind} 第 {current_round_number} 局结束，庄家 {current_dealer} 连庄。"
+            )
 
-        # 立直棒处理：和牌者拿走，流局保留
-        if end_type in {"TSUMO", "RON"}:
-            next_riichi_sticks = 0
-        else:  # 所有流局
-            next_riichi_sticks = current_riichi_sticks
+        # 3. 计算立直棒
+        if is_win:
+            next_riichi_sticks = 0  # 和牌者取走所有立直棒
+        else:  # 所有流局 (荒牌流局, 特殊流局)
+            next_riichi_sticks = current_riichi_sticks  # 立直棒保留在场上
 
-        final_next_hand_state: Dict[str, Any] = {
-            "next_dealer_index": next_dealer,
+        # 4. 组装结果
+        # 注意: 这里计算出的 next_round_wind 可能大于等于 self.total_round_winds
+        # (例如半庄南4结束后，计算出西1)。这表明游戏应该结束了。
+        # 游戏是否结束的最终判断应该由调用此函数后的 is_game_over 逻辑处理。
+        next_hand_state = {
+            "next_dealer_index": next_dealer_index,
             "next_round_wind": next_round_wind,
             "next_round_number": next_round_number,
             "next_honba": next_honba,
             "next_riichi_sticks": next_riichi_sticks,
         }
 
-        # TODO: 最后的检查：如果计算出的 next_round_wind 超过了游戏设定的最大场风 (例如半庄打完了南风场)，
-        # 这意味着整场游戏应该结束。这个判断逻辑主要属于 is_game_over。
-        # determine_next_hand_state 只是计算出标准规则下的下一局是什么。
-
-        print(f"Debug Next State: Determined next hand state: {final_next_hand_state}")
-
-        return final_next_hand_state
+        print(f"Debug Next State: Calculated next hand state: {next_hand_state}")
+        return next_hand_state

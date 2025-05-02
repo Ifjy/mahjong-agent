@@ -48,8 +48,8 @@ class GamePhase(Enum):
 class PlayerState:
     """表示单个玩家的状态"""
 
-    def __init__(self, player_id: int, initial_score: int):
-        self.player_id: int = player_id  # 玩家唯一标识 (0-3)
+    def __init__(self, player_index: int, initial_score: int):
+        self.player_index: int = player_index  # 玩家唯一标识 (0-3)
         self.score: int = initial_score  # 当前分数
         self.seat_wind: Optional[int] = (
             None  # 玩家座位风 (0=东, 1=南, 2=西, 3=北) - 每局开始时设置
@@ -1184,10 +1184,10 @@ class GameState:
     def update_scores(self, score_changes: Dict[int, int]):
         """根据计算结果更新玩家分数"""
         print(f"更新分数: {score_changes}")
-        for player_id, change in score_changes.items():
-            if 0 <= player_id < self.num_players:
-                self.players[player_id].score += change
-        print(f"更新后分数: {[(p.player_id, p.score) for p in self.players]}")
+        for player_index, change in score_changes.items():
+            if 0 <= player_index < self.num_players:
+                self.players[player_index].score += change
+        print(f"更新后分数: {[(p.player_index, p.score) for p in self.players]}")
         # 可以在此检查是否有人被飞
 
     def apply_next_hand_state(self, next_hand_state_info: Dict[str, Any]):
