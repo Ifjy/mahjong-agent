@@ -29,7 +29,7 @@ def main():
 
     # 创建环境
     env = MahjongEnv(config)
-
+    human_player_id = config["human_player_id"]
     # 重置环境
     observation, info = env.reset()
     env.render()
@@ -53,9 +53,9 @@ def main():
             print("错误：规则引擎未生成任何合法动作。终止对局。")
             terminated = True  # 设置终止标志，结束游戏循环
             # 不执行 env.step，直接进入下一循环迭代检查 terminated
-            continue # 跳过当前循环剩余部分
+            continue  # 跳过当前循环剩余部分
 
-        chosen_index = -1 # 初始化为无效索引
+        chosen_index = -1  # 初始化为无效索引
 
         # --- 玩家行动逻辑 (人类 vs AI) ---
         if current_player == human_player_id:
@@ -70,43 +70,47 @@ def main():
             # 循环直到获取到有效的玩家输入
             while chosen_index == -1:
                 try:
-                    input_str = input(f"玩家 {human_player_id}，请输入您选择的动作序号 (0-{len(valid_actions)-1}): ")
-                    input_index = int(input_str) # 尝试将输入转为整数
+                    input_str = input(
+                        f"玩家 {human_player_id}，请输入您选择的动作序号 (0-{len(valid_actions)-1}): "
+                    )
+                    input_index = int(input_str)  # 尝试将输入转为整数
 
                     # 检查输入的整数是否在有效动作列表的索引范围内
                     if 0 <= input_index < len(valid_actions):
-                        chosen_index = input_index # 输入有效，接受并跳出输入循环
+                        chosen_index = input_index  # 输入有效，接受并跳出输入循环
                     else:
-                        print(f"输入序号 {input_index} 超出有效范围。请重新输入 0 到 {len(valid_actions)-1} 之间的整数。")
+                        print(
+                            f"输入序号 {input_index} 超出有效范围。请重新输入 0 到 {len(valid_actions)-1} 之间的整数。"
+                        )
 
                 except ValueError:
                     # 如果输入不是一个有效的整数
                     print("输入无效，请输入一个整数序号。")
-                except EOFError: # 处理终端中按下 Ctrl+D 的情况
+                except EOFError:  # 处理终端中按下 Ctrl+D 的情况
                     print("\n输入中断，终止对局。")
-                    terminated = True # 设置终止标志
-                    break # 退出输入循环
+                    terminated = True  # 设置终止标志
+                    break  # 退出输入循环
 
             # 如果由于 EOFError 导致 terminated，需要检查并跳出主循环
             if terminated:
-                break # 退出 while not (terminated or truncated) 循环
+                break  # 退出 while not (terminated or truncated) 循环
 
         else:
             # --- AI 玩家选择逻辑 (使用你原有的简单AI，或者可以替换为更复杂的AI) ---
             print(f"玩家 {current_player} (AI) 正在思考并选择动作...")
             # 你原有的简单AI逻辑：选择第一个非PASS动作，如果没有非PASS动作，则选择PASS动作
-            ai_chosen_index = -1 # 用于存储AI选中的非PASS动作索引
-            pass_index = -1 # 用于存储PASS动作的索引
+            ai_chosen_index = -1  # 用于存储AI选中的非PASS动作索引
+            pass_index = -1  # 用于存储PASS动作的索引
 
             for i, action in enumerate(valid_actions):
                 # 假设 Action 对象有一个 type 属性，并且 ActionType 是一个枚举或常量类
                 # 检查是否是PASS动作，或者是否是其他类型的动作
-                if action.type != ActionType.PASS: # 假设 ActionType 有 PASS 成员
-                    ai_chosen_index = i # 找到第一个非PASS动作，记住它的索引
-                    break # 找到了就退出循环
+                if action.type != ActionType.PASS:  # 假设 ActionType 有 PASS 成员
+                    ai_chosen_index = i  # 找到第一个非PASS动作，记住它的索引
+                    break  # 找到了就退出循环
 
                 elif action.type == ActionType.PASS:
-                    pass_index = i # 记住PASS动作的索引，以防万一没有非PASS动作
+                    pass_index = i  # 记住PASS动作的索引，以防万一没有非PASS动作
 
             # 如果找到了非PASS动作，就选择它；否则，如果存在PASS动作，就选择PASS
             if ai_chosen_index != -1:
@@ -116,11 +120,13 @@ def main():
             else:
                 # 理论上 valid_actions 不会为空且没有 PASS，但这作为最后的安全备用
                 # 如果合法动作列表中既没有非PASS也没有PASS（这非常异常），则默认选择第一个动作
-                print(f"警告：AI玩家 {current_player} 未能从合法动作列表中选定动作。默认选择第一个动作。")
-                chosen_index = 0 # 选择第一个动作作为最后的备用
+                print(
+                    f"警告：AI玩家 {current_player} 未能从合法动作列表中选定动作。默认选择第一个动作。"
+                )
+                chosen_index = 0  # 选择第一个动作作为最后的备用
 
             # AI 选择动作后，可以增加一个短暂的延迟，模拟思考过程
-            time.sleep(0.5) # AI思考延迟，可以根据需要调整
+            time.sleep(0.5)  # AI思考延迟，可以根据需要调整
 
         # --- 执行选定的动作 ---
         # chosen_index 现在已经确定，是人类玩家输入的，或者是AI选择的
@@ -136,7 +142,7 @@ def main():
 
             # 可以选择性地累加人类玩家的奖励
             if current_player == human_player_id:
-            total_reward += reward
+                total_reward += reward
             # print(f"(您本回合获得奖励: {reward}, 累积总奖励: {total_reward})") # 可选：打印当前奖励
 
             # 渲染游戏状态，以便玩家或观察者看到变化
@@ -148,7 +154,7 @@ def main():
             #     time.sleep(0.1) # 人类回合延迟短一些
             # else:
             #     time.sleep(0.5) # AI回合延迟长一些
-            time.sleep(0.2) # 或者使用统一延迟
+            time.sleep(0.2)  # 或者使用统一延迟
 
     # --- 对局结束后的处理 ---
     # 循环结束后，游戏因 terminated 或 truncated 而终止
@@ -166,7 +172,7 @@ def main():
     print(f"人类玩家 {human_player_id} 的总奖励: {total_reward}")
 
     # 如果需要，可以在这里进行其他清理或总结工作
-    env.close() # 如果你的环境需要关闭操作
+    env.close()  # 如果你的环境需要关闭操作
 
 
 if __name__ == "__main__":
