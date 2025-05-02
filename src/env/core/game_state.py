@@ -1190,49 +1190,21 @@ class GameState:
         print(f"更新后分数: {[(p.player_id, p.score) for p in self.players]}")
         # 可以在此检查是否有人被飞
 
-    def advance_round(self, dealer_remains: bool):
+    def apply_next_hand_state(self, next_hand_state_info: Dict[str, Any]):
         """
-        推进到下一局或增加本场数。由环境在一局结束后调用。
-
-        Args:
-            dealer_remains (bool): 庄家是否连庄 (和牌或流局听牌)。
+        根据 RulesEngine 计算的下一局状态信息更新 GameState 的相关属性。
+        由环境调用。
         """
-        if self.is_game_over():
-            print("游戏已结束，无法推进局数。")
-            return False  # 返回 False 表示无法推进
+        print(f"应用下一局状态: {next_hand_state_info}")
+        self.dealer_index = next_hand_state_info["next_dealer_index"]
+        self.round_wind = next_hand_state_info["next_round_wind"]
+        self.round_number = next_hand_state_info["next_round_number"]
+        self.honba = next_hand_state_info["next_honba"]
+        self.riichi_sticks = next_hand_state_info["next_riichi_sticks"]
 
-        # 根据是否连庄更新本场数和庄家索引
-        if dealer_remains:
-            self.honba += 1
-            # 庄家不变 (self.dealer_index 不变)
-            print(f"庄家 ({self.dealer_index}) 连庄，本场增至 {self.honba}。")
-        else:
-            self.honba = 0  # 不连庄则本场清零
-            self.dealer_index = (self.dealer_index + 1) % self.num_players
-            print(f"下轮庄家变更为玩家 {self.dealer_index}，本场清零。")
-
-            # 如果庄家轮了一圈，检查是否需要进位到下一风或结束游戏
-            if self.dealer_index == 0:  # 庄家轮回到 P0
-                self.round_number += 1
-                print(f"局数推进至 {self.round_number} 局。")
-                if self.round_number > self.num_players:  # 通常是4局
-                    self.round_number = 1  # 重置局数
-                    self.round_wind += 1  # 进入下一风
-                    print(f"场风推进至 {['东','南','西','北'][self.round_wind]}。")
-                    # 检查游戏是否结束 (例如打完南场)
-                    # TODO: 使用更灵活的结束条件配置
-                    if self.round_wind > 1:  # 假设只打东南两风 (半庄)
-                        self._game_over_flag = True
-                        self.game_phase = GamePhase.GAME_OVER
-                        print("游戏结束 (完成南4局)。")
-                        return False  # 游戏结束，不再开始新局
-
-        # 准备开始新的一局 (重置牌局状态)
-        # 注意：这里不直接调用 reset_new_hand，让环境决定何时调用
-        self.game_phase = GamePhase.HAND_START  # 标记准备开始新局
-
-        # 返回 True 表示可以开始新局
-        return not self.is_game_over()
+        # 设置游戏阶段，表示本局结束，为下一局的 reset 做准备
+        # 这个阶段标志应该被 env.reset() 检查到，从而触发新局的牌局设置
+        self.game_phase = GamePhase.ROUND_END  # 例如，标记本局已结算完毕
 
     def get_info(self) -> Dict[str, Any]:
         """获取当前游戏状态的部分信息 (用于调试或记录)"""
