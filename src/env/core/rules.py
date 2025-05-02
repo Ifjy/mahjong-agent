@@ -276,56 +276,114 @@ class RulesEngine:
         full_hand_tiles = player.hand + (
             [player.drawn_tile] if player.drawn_tile else []
         )
-        # 使用 Counter 来统计每种 Tile (考虑赤牌) 的数量
+
+        # --- 1. 查找暗杠 (Ankan) ---
+        # 玩家手牌+摸牌中是否有 4 张相同的 Tile 对象
+        # 使用 Counter 统计每种 Tile (考虑赤牌) 的数量
         tile_counts: TypingCounter[Tile] = Counter(full_hand_tiles)
 
-        # 1. 查找暗杠 (Ankan)
-        for tile, count in tile_counts.items():
+        for (
+            tile_object,
+            count,
+        ) in tile_counts.items():  # 迭代的是具体的 Tile 对象和它的数量
             if count == 4:
-                # 检查立直后暗杠是否改变听牌 (日麻规则通常允许不改变听牌的暗杠)
-                # if player.riichi_declared and self._ankan_changes_wait(player, tile):
-                #     continue # 如果改变听牌则不允许
+                # 玩家有 4 张这个特定的 Tile 对象 (例如，4x Tile(5, False))
+
+                # TODO: 检查立直后暗杠是否改变听牌 (Kan shite mo fuuri)
+                # Rule: Cannot perform Ankan after Riichi if it changes the wait.
+                # This needs a helper method that can analyze the hand BEFORE removing the 4 tiles
+                # and AFTER removing the 4 tiles, then compare the waits.
+                # if player.riichi_declared and self._ankan_changes_wait(player, tile_object, game_state):
+                #     continue # 如果改变听牌则不允许生成此动作
+
+                # 找到实际构成暗杠的 4 张 Tile 对象 (它们就是手牌中那 4 张匹配的 Tile 对象)
+                ankan_meld_tiles = [
+                    t for t in full_hand_tiles if t == tile_object
+                ]  # 精确查找这 4 张牌对象
+
+                # 创建 Action 对象，包含构成杠的具体 Tile 对象列表
                 kan_actions.append(
-                    Action(type=ActionType.KAN, tile=tile, kan_type=KanType.CLOSED)
+                    Action(
+                        type=ActionType.KAN,
+                        kan_type=KanType.CLOSED,
+                        meld_tiles=ankan_meld_tiles,  # <-- 包含具体的 Tile 对象列表
+                        # tile=tile_object # 可选，作为代表牌，但主要信息在 meld_tiles
+                    )
                 )
 
-        # 2. 查找加杠 (Kakan)
-        # 加杠必须使用 摸到的牌(drawn_tile) 或者 手牌中的一张(hand) 来加到已有的碰(meld)上
-        tiles_available_for_kakan = (
-            [player.drawn_tile] if player.drawn_tile else []
-        ) + player.hand
-        processed_kakan_values = set()  # 防止对同一种牌值的碰重复生成加杠动作
+        # --- 2. 查找加杠 (Kakan) ---
+        # 加杠必须使用 手牌中的一张 或 摸到的牌 来加到已有的碰上
+        # 玩家的碰牌副露 player.melds
+        # 可用于加杠的牌池 full_hand_tiles
 
-        for meld in player.melds:
+        # 为了防止重复，我们需要记录哪些碰牌已经被考虑用于加杠
+        processed_kakan_pon_melds_indices = set()  # 记录已处理的碰牌副露的索引
+
+        for meld_index, meld in enumerate(player.melds):
             if meld["type"] == ActionType.PON:
-                pon_tile_value = meld["tiles"][0].value  # 碰的牌值
-                if pon_tile_value in processed_kakan_values:
-                    continue
+                # 这个副露是一个碰牌 (3 张)
+                # 查找手牌+摸牌区是否有可以加到这个碰上的牌
+                pon_tile_value = meld["tiles"][0].value  # 碰牌的数值
 
-                # 查找手牌中或摸到的牌是否有第四张
-                fourth_tile_instance = None
-                for tile in tiles_available_for_kakan:
-                    if tile.value == pon_tile_value:
-                        fourth_tile_instance = tile
-                        break  # 找到一张即可
+                # 查找 full_hand_tiles 中是否有与 pon_tile_value 数值相同的牌
+                # 注意：加杠允许混搭红宝牌和普通牌，所以这里只检查数值和花色
+                matching_tile_in_hand_or_drawn: Optional[Tile] = None
+                for tile in full_hand_tiles:
+                    # 检查数值和花色是否匹配碰牌
+                    # 假设 Tile 有 suit 属性
+                    if (
+                        tile.value == pon_tile_value
+                        and tile.suit == meld["tiles"][0].suit
+                    ):
+                        matching_tile_in_hand_or_drawn = (
+                            tile  # 找到那张可以加杠的牌对象
+                        )
+                        break  # 找到一张即可（当前规则假设一个碰牌最多加杠一次）
 
-                if fourth_tile_instance:
-                    # 检查立直后加杠是否改变听牌 (通常不允许)
-                    # if player.riichi_declared and self._kakan_changes_wait(player, fourth_tile_instance):
-                    #     continue
+                if matching_tile_in_hand_or_drawn:
+                    # 找到了可以加杠的牌对象
+                    # TODO: 检查立直后加杠是否允许 (Kan shite mo fuuri)
+                    # Rule: Cannot perform Kakan after Riichi if it changes the wait (usually always changes wait).
+                    # This needs a helper method.
+                    # if player.riichi_declared and self._kakan_changes_wait(player, matching_tile_in_hand_or_drawn, meld_index, game_state):
+                    #     continue # 如果改变听牌则不允许生成此动作
 
-                    # 创建 Action, tile 参数使用碰的那种牌的代表 (例如非赤牌?)
-                    # 或者就用找到的这张牌实例 fourth_tile_instance
+                    # 检查这个碰牌副露是否已经被考虑用于加杠（防止手牌有多张同值牌时重复生成）
+                    # 我们只为这个特定的碰牌副露生成一个加杠动作，无论手牌有几张同值牌可以加。
+                    if meld_index in processed_kakan_pon_melds_indices:
+                        continue  # 已经生成过动作
+
+                    # 创建 Action 对象，包含构成杠的具体 Tile 对象列表
+                    # 加杠副露包含碰牌的 3 张 + 加杠的 1 张
+                    kakan_meld_tiles = meld["tiles"] + [matching_tile_in_hand_or_drawn]
+
                     kan_actions.append(
                         Action(
                             type=ActionType.KAN,
-                            tile=fourth_tile_instance,
                             kan_type=KanType.ADDED,
+                            meld_tiles=kakan_meld_tiles,  # <-- 包含具体的 Tile 对象列表
+                            tile=matching_tile_in_hand_or_drawn,  # <-- 指定那张加杠的牌对象
                         )
                     )
-                    processed_kakan_values.add(pon_tile_value)
+                    processed_kakan_pon_melds_indices.add(
+                        meld_index
+                    )  # 标记此碰牌副露已处理
 
         return kan_actions
+
+    # TODO: Implement helper methods for 立直后杠改变听牌检查 (非常复杂)
+    # _ankan_changes_wait(self, player: PlayerState, kan_tile_object: Tile, game_state: GameState) -> bool
+    # _kakan_changes_wait(self, player: PlayerState, kakan_tile_object: Tile, pon_meld_index: int, game_state: GameState) -> bool
+
+    # TODO: Ensure Tile has a suit attribute (0=万, 1=筒, 2=索, 3=字) for suit matching in Kakan and Open Kan.
+    # TODO: Ensure ActionType has PON.
+    # TODO: Ensure KanType has CLOSED and ADDED.
+
+    def _find_self_open_kans(
+        self, player: PlayerState, game_state: GameState
+    ) -> List[Action]:
+        """查找玩家在自己回合可以进行的明杠"""
+        # 明杠 (Daiminkan) 必须使用 摸到的牌(drawn_tile) 或者 手牌中的一张(hand) 来加到已有的碰(meld)上
 
     def _find_riichi_discards(
         self, player: PlayerState, game_state: GameState
@@ -1596,4 +1654,24 @@ class RulesEngine:
         combined_hand = player.hand + player.drawn_tile
         if combined_hand.count(tile_to_kan) == 4:
             return True
+        return False
+
+    def validate_added_kan(self, player: PlayerState, tile_to_kan: Tile) -> bool:
+        """
+        检查玩家是否可以进行加杠 (Added Kan)。
+
+        Args:
+            player: 玩家状态对象。
+            tile_to_kan: 需要检查的牌。
+            melds: 玩家当前的副露列表。
+
+        Returns:
+            bool: 如果可以进行加杠，返回 True；否则返回 False。
+        """
+        # 加杠需要玩家手中有3张相同的牌，并且有一个副露包含这张牌
+        combined_hand = player.hand + player.drawn_tile
+        if tile_to_kan in combined_hand:
+            for meld in player.melds:
+                if tile_to_kan in meld["tiles"] and meld["meld_type"] == "PON":
+                    return True
         return False
