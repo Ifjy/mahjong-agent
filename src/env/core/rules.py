@@ -308,7 +308,6 @@ class RulesEngine:
                     Action(
                         type=ActionType.KAN,
                         kan_type=KanType.CLOSED,
-                        meld_tiles=ankan_meld_tiles,  # <-- 包含具体的 Tile 对象列表
                         # tile=tile_object # 可选，作为代表牌，但主要信息在 meld_tiles
                     )
                 )
@@ -359,7 +358,6 @@ class RulesEngine:
                         Action(
                             type=ActionType.KAN,
                             kan_type=KanType.ADDED,
-                            meld_tiles=kakan_meld_tiles,  # <-- 包含具体的 Tile 对象列表
                             tile=matching_tile_in_hand_or_drawn,  # <-- 指定那张加杠的牌对象
                         )
                     )
@@ -417,7 +415,6 @@ class RulesEngine:
                     type=ActionType.KAN,
                     kan_type=KanType.OPEN,
                     tile=last_discarded_tile,  # 响应动作通常用 tile 参数表示目标牌
-                    meld_tiles=open_kan_meld_tiles,  # <-- 包含具体的 Tile 对象列表
                 )
             )
 
@@ -428,7 +425,7 @@ class RulesEngine:
     # TODO: Ensure KanType has OPEN.
     # TODO: This method should be called in generate_candidate_actions during WAITING_FOR_RESPONSE phase.
     # TODO: Consider rules like Furiten (虽然主要影响 Ron，但理论上可能影响明杠的合法性，取决于具体规则实现)
-    # TODO: 检查玩家是否在立直状态。立直后可以明杠，但会解除门清，通常不划算且会改变听牌。
+    # TODO: 检查玩家是否在立直状态。立直后不可以明杠
 
     def _find_riichi_discards(
         self, player: PlayerState, game_state: GameState
@@ -579,16 +576,19 @@ class RulesEngine:
             return False
 
         # 2. 检查是否有役 (一番缚)
-        # TBD: 实现役种检查
-        context = self._get_win_context(
-            player, game_state, is_tsumo=True, win_tile=player.drawn_tile
-        )
-        yaku_info = self.calculate_yaku_and_score(
-            full_hand, player.melds, player.drawn_tile, context
-        )
-        if yaku_info.get("han", 0) < 1:
-            # print(f"Debug: 玩家 {player.player_id} 自摸成型但无役")
-            return False  # 无役不能和牌
+        # 调用专门检查是否有役的方法，传入必要的上下文信息
+        # is_tsumo=True 表示这是自摸的情况
+        # win_tile 对于自摸就是摸到的牌
+        if not self.has_at_least_one_yaku(
+            full_hand,
+            player.melds,
+            player.drawn_tile,
+            player,
+            game_state,
+            is_tsumo=True,
+        ):
+            # print(f"Debug: 玩家 {player.player_id} 自摸 {player.drawn_tile} 满足形状但无役")
+            return False
 
         return True
 
@@ -1060,168 +1060,6 @@ class RulesEngine:
     # == 计分、役种、符数相关 (占位符/简化实现) ==
     # ======================================================================
 
-    def calculate_yaku_and_score(
-        self,
-        hand_tiles_final: List[Tile],  # 和牌时的14张牌
-        melds: List[Meld],
-        win_tile: Tile,
-        context: Dict,
-    ) -> Dict:
-        """
-        计算和牌的役种、翻数、符数和最终得分。
-        (占位符 - 需要非常详细的实现)
-        """
-        # TBD: 实现完整的役种判断、符数计算和得分计算逻辑
-
-        yaku_list = []
-        han = 0
-        fu = 20  # 底符
-
-        # --- 0. 役种判断 (最复杂部分) ---
-        # TBD: 实现所有役种的判断逻辑
-        # 例如: 断幺九, 平和, 一杯口, 混全带, 一气通贯, 三色同顺, 役牌, 对对和, 三暗刻, 小三元, 混老头, 七对子, 清一色, 国士无双, 四暗刻, 大三元, 字一色 ...
-        # 需要考虑副露减翻、复合、食下等规则
-
-        # --- 简化示例 ---
-        if context.get("is_riichi"):
-            yaku_list.append(("立直", 1))
-            han += 1
-        # if context.get('is_ippatsu'):
-        #     yaku_list.append(("一发", 1)); han += 1
-        if context.get("is_tsumo") and context.get("is_menzen"):
-            yaku_list.append(("门前清自摸和", 1))
-            han += 1
-            fu += 2  # 自摸符 (门清时)
-
-        # 检查宝牌
-        dora_han = 0
-        all_tiles_in_hand_and_melds = hand_tiles_final + [
-            t for meld in melds for t in meld["tiles"]
-        ]
-        dora_indicators = context.get("dora_indicators", [])
-        ura_indicators = context.get("ura_dora_indicators", [])  # ura只在立直时有效
-
-        for tile in all_tiles_in_hand_and_melds:
-            dora_han += self._get_dora_value_for_tile(tile, dora_indicators)
-            if context.get("is_riichi"):  # 只有立直才看里宝
-                dora_han += self._get_dora_value_for_tile(tile, ura_indicators)
-            if tile.is_red:  # 赤宝牌
-                dora_han += 1
-
-        if dora_han > 0:
-            yaku_list.append((f"宝牌 {dora_han}", dora_han))
-            han += dora_han
-
-        # --- 1. 最低一番检查 ---
-        # 注意：宝牌不能作为唯一的一番来源 (除非有其他役)
-        non_dora_han = sum(h for name, h in yaku_list if "宝牌" not in name)
-        if non_dora_han < 1:
-            # print("和牌无役 (仅宝牌不算)") # 或者宝牌可以单独算？查规则
-            # 严格来说，如果只有宝牌，应该不能和。但有些规则允许？
-            # 暂时认为无役 (需要确认规则)
-            return {
-                "yaku": yaku_list,
-                "han": han,
-                "fu": 0,
-                "error": "和牌无役 (一番缚)",
-            }
-
-        # --- 2. 符数计算 ---
-        # TBD: 实现复杂的符数计算 (副底, 和牌方式, 面子组成, 雀头, 听牌型)
-        # 简化：
-        if self._is_seven_pairs_raw(hand_tiles_final, melds):
-            fu = 25  # 七对子固定25符
-        else:
-            # 其他牌型粗略估计 (例如平和自摸20符，其他门清荣和30符，非门清...)
-            # 门清荣和: 30符起?
-            # 门清自摸: 20符起? (因为有自摸2符)
-            # 副露: 20符起?
-            fu = 30  # 粗略估计
-            if context.get("is_tsumo") and context.get("is_menzen"):
-                fu = 20  # 平和自摸形？
-            # 加上自摸/荣和符、面子符、雀头符、听牌符...
-            # ... 复杂计算 ...
-            # 符数计算后需要向上取整到10位 (切り上げ)
-            fu = ((fu + 9) // 10) * 10
-
-        # --- 3. 得分计算 ---
-        # TBD: 实现基于翻数、符数、庄闲、本场、供托的完整点数计算
-
-        # 简化：计算基本点 (A)
-        if han >= 13:
-            base_points = 8000  # 役满 (子)
-        elif han >= 11:
-            base_points = 6000  # 三倍满
-        elif han >= 8:
-            base_points = 4000  # 倍满
-        elif han >= 6:
-            base_points = 3000  # 跳满
-        elif han == 5:
-            base_points = 2000  # 满贯
-        elif han <= 4 and fu > 0:  # 满贯以下
-            base_points = fu * (2 ** (han + 2))
-            if base_points > 2000:
-                base_points = 2000  # 4翻40符/3翻70符 截断为满贯
-        else:
-            base_points = 0  # 无役或计算错误?
-
-        # 向上取整到百位
-        base_points = ((base_points + 99) // 100) * 100
-
-        # 计算实际支付 (简化)
-        score_payments = {}  # {player_index: change}
-        is_dealer = context.get("is_dealer", False)
-        honba_bonus = context.get("honba", 0) * 300  # 每本场 300 点
-        riichi_sticks_bonus = (
-            context.get("riichi_sticks", 0) * 1000
-        )  # 每根立直棒 1000 点
-
-        if context.get("is_tsumo"):
-            # 自摸支付
-            oya_pay = ((base_points * 2 + 99) // 100) * 100 + (
-                honba_bonus // 3 * 100
-            )  # 庄家支付的部分 (需要处理本场)
-            ko_pay = ((base_points + 99) // 100) * 100 + (
-                honba_bonus // 3 * 100
-            )  # 子家支付的部分
-
-            winner_gain = 0
-            num_players = context.get("num_players", 4)  # 需要从context获取
-            for i in range(num_players):
-                if i == context.get("player_id"):
-                    continue  # player_id 需要在 context 中
-                payment = (
-                    oya_pay if i == context.get("dealer_id") else ko_pay
-                )  # dealer_id 需要在 context 中
-                score_payments[i] = -payment
-                winner_gain += payment
-            score_payments[context.get("player_id")] = winner_gain + riichi_sticks_bonus
-        else:  # 荣和支付
-            loser_id = context.get("loser_id")  # loser_id 需要在 context 中
-            payment = 0
-            if is_dealer:
-                payment = base_points * 6
-            else:
-                payment = base_points * 4
-            payment = ((payment + 99) // 100) * 100 + honba_bonus
-
-            score_payments[loser_id] = -payment
-            score_payments[context.get("player_id")] = payment + riichi_sticks_bonus
-
-        # 需要确保 context 包含 player_id, dealer_id, loser_id, num_players
-        print(
-            "警告: 分数支付计算依赖 context 中的 player_id, dealer_id, loser_id, num_players"
-        )
-
-        return {
-            "yaku": yaku_list,
-            "han": han,
-            "fu": fu,
-            "score_base": base_points,
-            "score_payments": score_payments,  # 字典形式的分数变化
-            "error": None,
-        }
-
     def _get_dora_value_for_tile(self, tile: Tile, indicators: List[Tile]) -> int:
         """计算一张牌相对于给定的宝牌指示牌列表的宝牌值"""
         count = 0
@@ -1316,100 +1154,333 @@ class RulesEngine:
 
     def calculate_yaku_and_score(
         self,
-        game_state,
-        hand_outcome: Dict,
+        hand_tiles_final: List[Tile],  # 和牌时的14张牌 (含和牌)
+        melds: List[Dict],  # Assuming List[Dict] with "tiles" key, or List[MeldObject]
+        win_tile: Tile,
+        context: Dict,
     ) -> Dict:
         """
-        计算和牌的役种、翻数、符数和最终得分。基于 hand_outcome 返回。
+        计算和牌的役种、翻数、符数和最终得分。
+        需要 context 字典包含和牌结算所需的所有相关信息。
         """
 
-        winner_id = hand_outcome["winner_id"]
-        loser_id = hand_outcome.get("loser_id")  # 自摸时为 None
-        hand_tiles_final = hand_outcome["hand_tiles_final"]
-        melds = hand_outcome["melds"]
-        win_tile = hand_outcome["win_tile"]
-        is_menzen = hand_outcome["is_menzen"]
-        is_riichi = hand_outcome["is_riichi"]
-        is_tsumo = hand_outcome["win_type"] == "tsumo"
-        honba = hand_outcome.get("honba", 0)
-        riichi_sticks = hand_outcome.get("riichi_sticks", 0)
-        dealer_id = hand_outcome["dealer_id"]
-        num_players = hand_outcome["num_players"]
+        # --- 0. 从 Context 提取必要信息 ---
+        # 明确 context 字典需要包含哪些 key
+        # 必须包含 (如果未自摸，还需要 loser_id):
+        required_keys = [
+            "winner_id",
+            "is_tsumo",
+            "is_menzen",
+            "is_riichi",
+            "is_dealer",
+            "dealer_id",
+            "honba",
+            "riichi_sticks",
+            "num_players",
+            "actual_dora_tiles",
+            "actual_ura_dora_tiles",  # 从 Wall 获取的实际宝牌/里宝牌牌型
+            "round_wind_value",
+            "player_seat_wind_value",  # 用于役牌、大三元等判断
+            # ... 可能还需要更多用于役种判断的信息，例如：
+            # "is_ippatsu", "is_haitei", "is_houtei", "is_rinshan", "is_chankan", etc.
+        ]
+        for key in required_keys:
+            if key not in context:
+                # print(f"Error: calculate_yaku_and_score context missing required key: {key}")
+                # 可以返回错误信息或抛出异常
+                return {
+                    "yaku": [],
+                    "han": 0,
+                    "fu": 0,
+                    "score_base": 0,
+                    "score_payments": {},
+                    "error": f"Context missing required key: {key}",
+                }
+        if not context["is_tsumo"] and "loser_id" not in context:
+            # print("Error: calculate_yaku_and_score context missing loser_id for Ron win")
+            return {
+                "yaku": [],
+                "han": 0,
+                "fu": 0,
+                "score_base": 0,
+                "score_payments": {},
+                "error": "Context missing loser_id for Ron win",
+            }
 
-        # 简化版役种识别
-        han = 1
-        fu = 30
-        yaku_list = [("临时役", 1)]
+        winner_id = context["winner_id"]
+        loser_id = context.get("loser_id")  # 自摸时为 None
+        is_tsumo = context["is_tsumo"]
+        is_menzen = context["is_menzen"]
+        is_riichi = context["is_riichi"]
+        is_dealer_win = context["is_dealer"]  # 赢家是否是庄家
+        dealer_id = context["dealer_id"]  # 这局的庄家 ID
+        honba = context["honba"]
+        riichi_sticks = context["riichi_sticks"]
+        num_players = context["num_players"]
+        actual_dora_tiles = context["actual_dora_tiles"]
+        actual_ura_dora_tiles = context["actual_ura_dora_tiles"]
+        # 提取其他可选 context 信息...
 
+        yaku_list = []
+        base_yaku_han = 0  # 非宝牌役种的翻数总和
+        yakuman_list = []  # 役满列表
+        yakuman_han = 0  # 役满翻数 (单倍役满算 13 翻或特定点数，多倍役满累加)
+
+        # --- 1. 役种判断 (最复杂部分) ---
+        # 需要根据 hand_tiles_final, melds, win_tile, context
+        # 来判断所有适用的非役满役种和役满役种
+
+        # 1.1 判断役满
+        # TODO: 实现役满判断逻辑 (国士无双、四暗刻、大三元等)
+        # diagnosed_yakuman = self._diagnose_yakuman(hand_tiles_final, melds, win_tile, context) # 需要实现这个 helper
+        # if diagnosed_yakuman:
+        #    yakuman_list.extend(diagnosed_yakuman)
+        #    # 役满翻数累加 (双倍役满等)
+        #    yakuman_han = sum(han for name, han in yakuman_list) # Assume helper returns list of (name, han) for yakuman
+        #    # 如果是役满，通常不再计算非役满役种和符数，直接结算役满点数。
+
+        # 1.2 判断非役满役种 (仅在没有役满时进行)
+        # if not yakuman_list:
+        # TODO: 实现所有非役满役种的判断逻辑 (断幺九, 平和, 一杯口, ... 清一色)
+        # diagnosed_normal_yaku = self._diagnose_normal_yaku(hand_tiles_final, melds, win_tile, context) # 需要实现这个 helper
+        # yaku_list.extend(diagnosed_normal_yaku)
+        # base_yaku_han = sum(han for name, han in yaku_list)
+
+        # --- Placeholder / Simplified Yaku ---
+        # 将原有的简化役种判断整合进来
+        # 注意：这里的判断是不完整的，仅为示例
         if is_riichi:
             yaku_list.append(("立直", 1))
-            han += 1
+            base_yaku_han += 1
         if is_tsumo and is_menzen:
             yaku_list.append(("门前清自摸和", 1))
-            han += 1
-            fu = 20
+            base_yaku_han += 1
+        # TODO: 检查其他役牌、自风场风、断幺九（需要分析手牌构成）等基础役
+        # Example: check for Yakuhai (役牌) based on context.round_wind_value, context.player_seat_wind_value and hand_tiles_final/melds
+        # Add other simplified yaku checks here...
 
-        # 宝牌计算（可以补充）
-        # dora_han = ...
+        # --- 2. 宝牌计算 ---
+        dora_han = 0
+        all_tiles_in_hand_and_melds = list(hand_tiles_final)  # 从 14 张和牌开始
+        # 添加副露中的牌
+        for meld in melds:
+            if "tiles" in meld:  # 假设副露是字典列表，且包含 "tiles" 键
+                all_tiles_in_hand_and_melds.extend(meld["tiles"])
+            # TODO: 如果你的 meld 是自定义对象，需要调整这里来获取其中的 Tile 列表
 
-        # 基础得点
-        if han >= 5:
-            score_base = 2000
-        elif han == 4:
-            score_base = 1300 if fu == 30 else 2000
-        elif han == 3:
-            score_base = 700 if fu == 30 else 1000
-        elif han == 2:
-            score_base = 400 if fu == 30 else 500
+        # 计算宝牌数 (表宝牌 + 里宝牌 + 赤宝牌)
+        for tile in all_tiles_in_hand_and_melds:
+            dora_han += self._count_dora_for_tile(tile, actual_dora_tiles)
+            if is_riichi:  # 只有立直和牌才计算里宝牌
+                dora_han += self._count_dora_for_tile(tile, actual_ura_dora_tiles)
+            if tile.is_red:  # 赤宝牌
+                dora_han += 1
+
+        if dora_han > 0:
+            # 将宝牌作为役种添加到列表中（方便显示），但它的翻数不计入一番缚的基础
+            yaku_list.append((f"宝牌+", dora_han))
+        # 总翻数 = 基本役翻数 + 宝牌翻数
+        han = base_yaku_han + dora_han
+
+        # --- 3. 和牌有效性检查 (一番缚 / 役满) ---
+        # 如果有役满，则和牌有效，不再需要一番缚检查
+        if not yakuman_list:
+            # 如果没有役满，则检查是否有至少一番的非宝牌役种
+            if base_yaku_han < 1:
+                return {
+                    "yaku": yaku_list,  # 返回发现的所有役种 (包括宝牌)
+                    "han": han,  # 返回总翻数
+                    "fu": 0,  # 无效和牌，符数无意义
+                    "score_base": 0,  # 无效和牌，点数无意义
+                    "score_payments": {},  # 无效和牌，无支付
+                    "error": "和牌无役 (一番缚)",
+                }
+            # else: 有非宝牌役，可以继续计算符和点
+
+        # --- 4. 符数计算 ---
+        # TBD: 实现复杂的符数计算 (副底, 和牌方式, 面子组成, 雀头, 听牌型)
+        # 这是另一个复杂的逻辑，需要详细分解手牌。
+        # 简化 Placeholder
+        fu = 20  # 底符 (Base Fu)
+        if yakuman_list:  # 役满通常不计算符数
+            fu = 0  # 或者根据特定役满规则设定符数，但通常不影响点数
+        elif self._is_seven_pairs_raw(
+            hand_tiles_final, melds
+        ):  # 假设这个 helper 检查七对子形状
+            fu = 25  # 七对子固定25符
         else:
-            score_base = 300
+            # 正常牌型的符数计算 (复杂!)
+            # - 门清荣和：底符20 + 荣和符10 + 面子符 + 雀头符 + 听牌符 = 30符起
+            # - 门清自摸：底符20 + 自摸符2 + 面子符 + 雀头符 + 听牌符 = 22符起 (平和自摸例外20符)
+            # - 副露荣和/自摸：底符20 + 面子符 + 雀头符 + 听牌符 = 20符起
+            # ... 复杂的面子符 (幺九牌刻子翻倍), 雀头符 (役牌雀头翻倍), 听牌符 (单骑、边张、坎张加符) 计算 ...
 
-        # 支付计算
-        score_payments = defaultdict(int)
-        total_gain = 0
-        is_dealer_win = winner_id == dealer_id
-        honba_bonus = honba * 300
-        riichi_bonus = riichi_sticks * 1000
+            # 示例：加上自摸/荣和的底符基础
+            if is_menzen and not is_tsumo:  # 门清荣和
+                fu += 10  # 荣和符 10
+            # Note: 门清自摸没有额外的自摸符，但其底符是20，符数计算略有不同（平和自摸）。
+            # 副露自摸有自摸符2符。
+
+            # TODO: 根据手牌构成和和牌方式计算面子符、雀头符、听牌符并加到 fu 上
+
+            # 符数计算后需要向上取整到10位 (切り上げ)
+            # 例外：七对子25符，平和自摸20符。
+            if fu > 20 and fu != 25:  # 七对子是25，平和自摸是20
+                fu = ((fu + 9) // 10) * 10
+            elif fu < 20 and not is_menzen:  # 副露最低20符（不含七对子）
+                fu = 20
+
+        # --- 5. 得分计算 ---
+        # 实现基于总翻数、符数、庄闲、本场、供托的完整点数计算
+
+        score_base = 0  # 基础点数 (不含本场和供托)
+
+        # 5.1 役满点数
+        if yakuman_list:
+            # 役满根据翻数有不同的点数
+            # 单倍役满 子家 8000点（庄家 12000点）
+            # 双倍役满 子家 16000点（庄家 24000点）
+            # 三倍役满 子家 24000点（庄家 36000点）等
+            # base_points_per_yakuman = 8000 # 单倍役满基础点（子家）
+            # score_base = yakuman_han * base_points_per_yakuman # 简单的役满点数计算
+            # TODO: 根据役满类型和翻数计算准确的役满点数
+            # Placeholder:
+            score_base = 8000 * yakuman_han  # 粗略估算
+
+        # 5.2 非役满点数 (翻数 >= 1 and < 13)
+        elif han >= 1 and han < 13 and fu > 0:  # 需要有役且符数大于0 (役满已排除)
+            # 计算基础点数 A = 符数 * 2^(翻数 + 2)
+            raw_base_points = fu * (2 ** (han + 2))
+
+            # 应用满贯及以上截断
+            if han >= 6:  # 跳满 (6-7翻)
+                score_base = 3000  # 子家跳满 base
+            elif han >= 8:  # 倍满 (8-10翻)
+                score_base = 4000  # 子家倍满 base
+            elif han >= 11:  # 三倍满 (11-12翻)
+                score_base = 6000  # 子家三倍满 base
+            elif han == 5:  # 满贯 (5翻)
+                score_base = 2000  # 子家满贯 base
+            elif han <= 4:  # 满贯以下 (1-4翻)
+                # 检查切り上げ満貫 (Kiraiage Mangan)
+                if raw_base_points > 2000:
+                    score_base = 2000  # 截断为满贯
+                else:
+                    score_base = raw_base_points  # 未满满贯的实际点数基础
+            else:  # 理论上不应该到这里
+                score_base = 0  # 计算错误？
+
+        # 5.3 点数支付计算
+        score_payments = defaultdict(int)  # 使用 defaultdict 方便累加分数变化
+        total_gain_from_players = 0  # 从其他玩家获得的净点数（不含供托）
+
+        honba_bonus_per_player_tsumo = honba * 100  # 自摸时每家支付的本场点数
+        honba_bonus_total_ron = honba * 300  # 荣和时放铳者支付的总本场点数
+        riichi_sticks_bonus = riichi_sticks * 1000  # 立直供托点数
 
         if is_tsumo:
-            for pid in range(num_players):
-                if pid == winner_id:
-                    continue
-                is_pid_dealer = pid == dealer_id
-                if is_dealer_win:
-                    payment = (
-                        (score_base * 2 + 99) // 100
-                    ) * 100 + honba_bonus // num_players
-                else:
-                    if is_pid_dealer:
-                        payment = (
-                            (score_base * 2 + 99) // 100
-                        ) * 100 + honba_bonus // num_players
-                    else:
-                        payment = (
-                            (score_base + 99) // 100
-                        ) * 100 + honba_bonus // num_players
-                score_payments[pid] -= payment
-                total_gain += payment
-        else:
-            if loser_id is not None:
-                if is_dealer_win:
-                    payment = ((score_base * 6 + 99) // 100) * 100 + honba_bonus
-                else:
-                    payment = ((score_base * 4 + 99) // 100) * 100 + honba_bonus
-                score_payments[loser_id] -= payment
-                total_gain += payment
+            # 自摸点数计算和支付 (根据基础点数 A 和庄闲关系)
+            # A = fu * 2^(han+2) (在应用满贯等截断之前)
+            # Simplified calculation using the potentially truncated score_base
+            # Need to use the correct payment formulas based on base_points and dealer status
+            if is_dealer_win:  # 庄家自摸 (闲家每人支付 base_points * 2, 向上取整到百)
+                payment_per_ko = (
+                    (score_base * 2 + 99) // 100
+                ) * 100 + honba_bonus_per_player_tsumo
+                for pid in range(num_players):
+                    if pid != winner_id:
+                        score_payments[pid] -= payment_per_ko
+                        total_gain_from_players += payment_per_ko
+            else:  # 子家自摸 (庄家支付 base_points * 2, 子家支付 base_points * 1, 都向上取整到百)
+                payment_oya = (
+                    (score_base * 2 + 99) // 100
+                ) * 100 + honba_bonus_per_player_tsumo
+                payment_ko = (
+                    (score_base + 99) // 100
+                ) * 100 + honba_bonus_per_player_tsumo
+                for pid in range(num_players):
+                    if pid == winner_id:
+                        continue
+                    if pid == dealer_id:  # 如果对方是庄家
+                        score_payments[pid] -= payment_oya
+                        total_gain_from_players += payment_oya
+                    else:  # 如果对方是子家
+                        score_payments[pid] -= payment_ko
+                        total_gain_from_players += (
+                            payment_ko * 1
+                        )  # *1 for clarity, two other children pay
 
-        score_payments[winner_id] += total_gain + riichi_bonus
+            score_payments[winner_id] += (
+                total_gain_from_players + riichi_sticks_bonus
+            )  # 赢家收取点数和立直棒
+
+        else:  # 荣和 (Ron)
+            if loser_id is None:
+                # 这个错误应该在 context 检查时捕获
+                print("Error: Ron win calculation called without loser_id in context.")
+                return {
+                    "yaku": yaku_list,
+                    "han": han,
+                    "fu": fu,
+                    "score_base": score_base,
+                    "score_payments": {},
+                    "error": "Internal Error: Ron win calculation missing loser_id",
+                }
+
+            # 荣和点数计算和支付 (放铳者支付全部点数)
+            # 点数 = (基础点数 A * 荣和系数 + 99) // 100 * 100 + 本场*300 + 立直供托*1000
+            # 荣和系数：庄家赢是 6，子家赢是 4
+            ron_coefficient = 6 if is_dealer_win else 4
+            payment_total = (
+                ((score_base * ron_coefficient + 99) // 100) * 100
+                + honba_bonus_total
+                + riichi_sticks_bonus
+            )
+
+            score_payments[loser_id] -= payment_total
+            score_payments[winner_id] += payment_total  # 赢家收取全部点数和立直棒
+
+        # --- 返回结果 ---
+        # 根据是否有役满或基本役判断最终是否是有效和牌
+        final_error = None
+        if not yakuman_list and base_yaku_han < 1:
+            final_error = "和牌无役 (一番缚)"  # 除非是役满，否则无役是错误
 
         return {
-            "yaku": yaku_list,
-            "han": han,
-            "fu": fu,
-            "score_base": score_base,
-            "score_payments": dict(score_payments),
-            "error": None,
+            "yaku": yaku_list,  # 所有诊断出的役种 (包括宝牌和役满)
+            "han": han,  # 总翻数 (包括宝牌和役满翻数)
+            "fu": fu if not yakuman_list else 0,  # 役满通常符数记为0 (或者特定值)
+            "score_base": score_base,  # 子家 base 点数 (未乘庄闲系数，已应用满贯截断)
+            "score_payments": dict(score_payments),  # 字典形式 {玩家ID: 分数变化}
+            "error": final_error,
+            "yakuman": [name for name, han in yakuman_list],  # 单独列出役满名称列表
+            "yakuman_han": yakuman_han,  # 役满总翻数 (对于多倍役满)
         }
+
+    # 你需要实现的辅助方法示例：
+    # def _diagnose_yakuman(self, hand_tiles_final, melds, win_tile, context) -> List[Tuple[str, int]]:
+    #     """判断并返回役满列表及其翻数"""
+    #     # TODO: 实现天和、地和、国士无双、四暗刻等判断
+    #     pass
+
+    # def _diagnose_normal_yaku(self, hand_tiles_final, melds, win_tile, context) -> List[Tuple[str, int]]:
+    #     """判断并返回非役满役种列表及其翻数 (已考虑副露减翻)"""
+    #     # TODO: 实现断幺九、平和、役牌、一盃口、混全带幺九等判断
+    #     pass
+
+    # def _calculate_mentsu_fu(self, mentsu, context):
+    #     """计算面子（顺子、刻子、杠）的符数"""
+    #     pass
+
+    # def _calculate_jantou_fu(self, jantou, context):
+    #     """计算雀头的符数"""
+    #     pass
+
+    # def _calculate_machi_fu(self, win_tile, hand_tiles_final, context):
+    #     """计算听牌型的符数"""
+    #     pass
+
+    # 假设你已经有了 _is_seven_pairs_raw 方法来检查七对子形状
 
     def get_hand_outcome(self, game_state: "GameState") -> Dict[str, Any]:
         """

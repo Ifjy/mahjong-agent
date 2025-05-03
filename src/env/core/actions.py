@@ -1,7 +1,6 @@
 from enum import Enum, auto
 from dataclasses import dataclass, field  # 导入field用于default_factory
 from typing import (
-    List,
     Optional,
     Tuple,
 )  # 使用Tuple表示固定长度的序列（如吃牌时的两张牌）
@@ -279,11 +278,11 @@ if __name__ == "__main__":
 
     # 测试特征向量生成
     print("\n特征向量示例（KAN_CLOSED）:")
-    feat_vec = action_kan_closed.to_feature_vector(max_feature_size=150)
+    feat_vec = action_kan_closed.to_feature_vector(feature_size=150)
     print(f"向量大小: {len(feat_vec)}")
     print(f"非零索引: {np.where(feat_vec != 0)[0]}")
 
     print("\n特征向量示例（CHI）:")
-    feat_vec_chi = action_chi.to_feature_vector(max_feature_size=150)
+    feat_vec_chi = action_chi.to_feature_vector(feature_size=150)
     print(f"向量大小: {len(feat_vec_chi)}")
     print(f"非零索引: {np.where(feat_vec_chi != 0)[0]}")

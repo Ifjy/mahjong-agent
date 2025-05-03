@@ -1,11 +1,13 @@
+from typing import Dict
+
 import gym
 from gym import spaces
 import numpy as np
-from typing import Dict, List, Optional
 
 from src.env.core.game_state import GameState, Wall, GamePhase
 from src.env.core.rules import RulesEngine
-from src.env.core.actions import Action
+
+# from src.env.core.actions import Action
 from src.env.state_encoder import StateEncoder
 from src.env.renderer import Renderer
 
@@ -96,16 +98,9 @@ class MahjongEnv(gym.Env):
             self.game_state.game_phase = GamePhase.HAND_OVER_SCORES  # 切换阶段到结算
 
             # TODO: 获取本局游戏结果的详细信息 (和牌类型、番数、符、点数变动、流局类型等)
-            # 需要 RulesEngine 提供一个方法，例如 get_hand_outcome
-            hand_outcome_info = self.rules_engine.get_hand_outcome(
-                self.game_state
-            )  # 假设 RulesEngine 有此方法
+            hand_outcome_info = self.rules_engine.get_hand_outcome(self.game_state)
 
             # # TODO: 根据本局结果计算玩家点数变动
-            # # 需要 RulesEngine 提供方法计算点数变化列表 {player_index: score_change}
-            # score_changes = self.rules_engine.calculate_yaku_and_score(
-            #     self.game_state, hand_outcome_info
-            # )  # 假设 RulesEngine 有此方法
             # get hand outcome 中会调用函数calculate_yaku_and_score计算。 同时中间会有字段 score_changes 记录点数变动。
             # TODO: 应用点数变动到玩家分数
             # 需要 GameState 提供方法更新玩家分数
@@ -125,7 +120,7 @@ class MahjongEnv(gym.Env):
                 next_hand_state_info
             )  # 假设 GameState 有此方法
             self.game_state.game_phase = (
-                GamePhase.ROUND_END
+                GamePhase.HAND_OVER_SCORES
             )  # 标记本局结束，准备进入下一局设置
 
             # --- 检查整场游戏是否结束 ---

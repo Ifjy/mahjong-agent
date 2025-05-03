@@ -2,24 +2,8 @@ from __future__ import annotations
 import random
 from enum import Enum, auto
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Tuple, Set  # 引入类型提示
+from typing import List, Optional, Dict, Any, Tuple, Set, TYPE_CHECKING  # 引入类型提示
 from collections import Counter
-
-
-# --- 从 actions.py 导入我们定义好的类 ---
-# 假设 actions.py 与 game_state.py 在同一目录下或已正确配置路径
-# 如果不在同一目录，需要调整 import 路径，例如 from src.env.core.actions import ...
-from .actions import Action, ActionType, Tile, KanType
-
-# (我们也可以在这里定义 Meld 类)
-import random
-from enum import Enum, auto
-from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING  # 引入类型提示
-
-# --- 从 actions.py 导入我们定义好的类 ---
-# 假设 actions.py 与 game_state.py 在同一目录下或已正确配置路径
-# 如果不在同一目录，需要调整 import 路径，例如 from src.env.core.actions import ...
 from .actions import Action, ActionType, Tile, KanType
 
 if TYPE_CHECKING:
@@ -260,6 +244,7 @@ class Wall:
         return current_dora_tiles
 
 
+@dataclass
 class GameState:
     """
     表示日本麻将游戏的完整状态。
@@ -1412,7 +1397,7 @@ class GameState:
 
         # 设置游戏阶段，表示本局结束，为下一局的 reset 做准备
         # 这个阶段标志应该被 env.reset() 检查到，从而触发新局的牌局设置
-        self.game_phase = GamePhase.ROUND_END  # 例如，标记本局已结算完毕
+        self.game_phase = GamePhase.HAND_OVER_SCORES  # 例如，标记本局已结算完毕
 
     def get_info(self) -> Dict[str, Any]:
         """获取当前游戏状态的部分信息 (用于调试或记录)"""
