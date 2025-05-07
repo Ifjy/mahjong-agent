@@ -682,13 +682,15 @@ class GameState:
                 combined_hand = list(player.hand)  # 创建手牌的副本
                 if player.drawn_tile:
                     combined_hand.append(player.drawn_tile)  # 将摸到的牌添加到副本中
-                if not self.rules_engine.check_win(combined_hand, player.melds):
+                if not self.rules_engine._check_basic_win_shape(
+                    combined_hand, player.melds
+                ):
                     print("错误: 手牌不构成和牌型，自摸无效。")
                     # TODO: 返回无效动作信号 / 抛出错误
                     return  # 无效自摸
 
                 # 调用 RulesEngine 检查是否满足和牌条件，win_info 包含和牌详情
-                win_info = self.rules_engine.check_win(
+                win_info = self.rules_engine._check_basic_win_shape(
                     combined_hand, player.melds
                 )  # <--- 修复：传入组合手牌副本
 
@@ -708,9 +710,9 @@ class GameState:
                     # 它也会传递和牌详情给 RulesEngine 进行分数计算
                     self._transition_to_scoring(
                         winner_index=player_index,
-                        winning_tile=winning_tile_obj,  # 传递实际和牌的牌对象
                         is_tsumo=True,
-                        win_info=win_info,  # 传递 RulesEngine 检查到的和牌详情
+                        win_info=win_info,  # 传递和牌详情
+                        ron_player_index=None,  # 自摸时没有放铳玩家
                     )
                 else:
                     print(
@@ -719,7 +721,6 @@ class GameState:
                     # TODO: 返回无效动作信号 / 抛出错误
                     return  # 无效自摸
             # 4. 处理 KAN (杠) 动作 (暗杠或加杠)
-            # todo kan 下分为 closed added open
             elif action.type == ActionType.KAN:  # <--- 检查 ActionType.KAN
                 player = self.players[player_index]
                 tile_to_kan = action.tile  # 组成杠的牌 (暗杠是四张之一，加杠是第四张)
@@ -985,7 +986,88 @@ class GameState:
         # 来生成下一个 observation 和可行动作列表。
 
     # --- 辅助方法 (在 GameState 类内部实现) ---
+    def _transition_to_scoring(
+        self,
+        winner_index: int,
+        is_tsumo: bool,
+        win_info: Dict[str, Any],
+        ron_player_index: Optional[int] = None,
+    ):
+        """
+        过渡游戏阶段到结算，存储本局和牌的关键信息。
+        这个方法由 apply_action 调用，用于在和牌发生时更新状态并触发结算流程。
+        实际的分数计算和应用在 MahjongEnv.step 中进行。
 
+        Args:
+            winner_index: 和牌玩家索引 (0-3)。
+            is_tsumo: 是否为自摸和牌 (True) 或荣和 (False)。
+            win_info: RulesEngine.check_win 或 check_ron 返回的详细和牌信息 (包含役、番、符、和牌牌等)。
+            ron_player_index: 放铳玩家索引 (仅荣和时提供，自摸为 None)。
+        """
+        print(
+            f"过渡到结算阶段 (HAND_OVER_SCORES)。获胜玩家: {winner_index}, 类型: {'自摸' if is_tsumo else '荣和'}"
+        )
+        self.game_phase = GamePhase.HAND_OVER_SCORES
+
+        # --- 存储本局结束的关键信息 ---
+        # 将 RulesEngine 验证和计算的原始 win_info 存储起来，供 RulesEngine.get_hand_outcome 在 step() 中读取
+        # end_type 用于 RulesEngine.get_hand_outcome 识别结束类型
+        self._hand_outcome_info_temp = {
+            "end_type": "TSUMO" if is_tsumo else "RON",
+            "winner_index": winner_index,
+            "ron_player_index": ron_player_index,  # 荣和时是放铳者，自摸时是 None
+            "is_tsumo": is_tsumo,
+            "win_details": win_info,  # 存储从 check_win/check_ron 得到的详细信息 (包括 winning_tile)
+            # TODO: 如果 RulesEngine.get_hand_outcome 需要，可以在这里存储当前局的 honba 和 riichi_sticks 数量
+            # self.honba 和 self.riichi_sticks 已经在 GameState 中维护
+            # 也可以让 get_hand_outcome 直接读取 self.honba 和 self.riichi_sticks
+        }
+
+        # --- 清理玩家状态 ---
+        winning_player = self.players[winner_index]
+        # 假设 win_info 字典中包含了 "winning_tile" 键，其值为实际和牌的 Tile 对象
+        winning_tile_obj = win_info.get("winning_tile")
+
+        # 1. 清理玩家摸到的牌槽位
+        # 和牌后，玩家摸到的牌（如果存在）要么是和牌牌（自摸），要么已经被打出/杠掉。
+        # 直接清空摸牌槽位是安全的。
+        for p in self.players:
+            p.drawn_tile = None  # 清空所有玩家的摸牌槽位
+
+        # 2. 移除和牌牌 (如果它是从手牌中和的，例如国士无双十三面听自摸手牌中的一张)
+        # 标准自摸和牌牌是 drawn_tile，上一步已经清空。
+        # 标准荣和牌是被弃牌，不在手牌中。
+        # 特殊和牌（如国士无双十三面听的自摸，和牌牌在手牌里）需要从手牌移除。
+        # 我们检查和牌牌对象是否存在于当前玩家手牌中。
+        if winning_tile_obj is not None and winning_tile_obj in winning_player.hand:
+            print(
+                f"移除和牌牌 {winning_tile_obj} 从玩家 {winner_index} 手牌 (例如国士无双特殊和牌)。"
+            )
+            # 使用 _remove_tiles_from_hand 辅助方法移除
+            # _remove_tiles_from_hand 返回 True/False 表示成功/失败
+            if not self._remove_tiles_from_hand(winning_player, [winning_tile_obj]):
+                print(
+                    "Internal error: Failed to remove winning tile from hand after Tsumo (special case). State inconsistent."
+                )
+                # TODO: 处理内部错误，游戏状态可能已损坏
+
+        # 3. 清除所有玩家的一发状态
+        # 和牌或副露会打破所有玩家的一发机会
+        print("清除所有玩家的一发机会。")
+        for p in self.players:
+            p.ippatsu_chance = False
+
+        # 4. TODO: 清除其他与本局进程相关的瞬时状态
+        # 例如，一些与第一巡相关的标志、四风连打/四杠散了宣告后的状态等。
+        # TODO: 立直棒的处理：立直棒通常归和牌者所有。点数的转移在 calculate_hand_scores 中计算。
+        # GameState 的 riichi_sticks 数量在 apply_next_hand_state 中根据 determine_next_hand_state 的结果更新。
+
+    # ... (其他方法，如 _remove_tiles_from_hand) ...
+    # 确保 _remove_tiles_from_hand 方法已正确实现并返回 bool
+    # 确保 PlayerState 类有 drawn_tile, hand, ippatsu_chance, player_index 属性
+    # 确保 GamePhase 枚举包含 HAND_OVER_SCORES
+    # 确保 Tile 对象是 hashable 和 comparable (value 和 is_red)
+    # 确保 win_info 字典结构包括 "winning_tile" 键
     def _build_response_prompt_queue(self, discarded_tile: Tile) -> List[int]:
         """
         根据当前游戏状态和打出的牌，构建需要依次提示声明响应的玩家队列。
@@ -1420,3 +1502,36 @@ class GameState:
             # 可以添加更多调试信息...
             # "player_hands": [[str(t) for t in p.hand] for p in self.players], # 可能非常庞大
         }
+
+
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any
+
+
+@dataclass
+class WinDetails:
+    """存储一次和牌的详细分析结果"""
+
+    is_valid_win: bool = False  # 是否是规则上允许的和牌 (例如，不是振听荣和)
+    winning_tile: Optional["Tile"] = None  # 和牌的那张牌对象
+    is_tsumo: bool = False  # 是否是自摸
+    yaku: List[str] = field(
+        default_factory=list
+    )  # 构成和牌的所有役种名称列表 (例如 ["Riichi", "Tsumo", "Pinfu"])
+    han: int = 0  # 总番数 (不含宝牌)
+    fu: int = 0  # 符数
+    is_yakuman: bool = False  # 是否是役满
+    yakuman_list: List[str] = field(
+        default_factory=list
+    )  # 役满名称列表 (例如 ["Kokushi Musou"])
+    dora_count: int = 0  # 宝牌数 (Dora + Red Dora + Ura Dora)
+    # TODO: 可能需要更多细节，例如宝牌指示牌、里宝牌指示牌、具体宝牌列表等
+
+    # 可能需要根据游戏规则添加其他标志，例如：
+    # is_menzen: bool = False # 是否门前清
+    # is_ippatsu: bool = False # 是否一发
+    # is_haitei: bool = False # 是否海底捞月
+    # is_houtei: bool = False # 是否河底捞鱼
+    # is_rinshan: bool = False # 是否岭上开花
+    # is_chankan: bool = False # 是否抢杠
+    # ...

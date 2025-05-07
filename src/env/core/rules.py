@@ -572,7 +572,7 @@ class RulesEngine:
         full_hand = player.hand + [player.drawn_tile]
 
         # 1. 检查是否和牌型
-        if not self.check_win(full_hand, player.melds):
+        if not self._check_basic_win_shape(full_hand, player.melds):
             return False
 
         # 2. 检查是否有役 (一番缚)
@@ -592,52 +592,7 @@ class RulesEngine:
 
         return True
 
-    def has_at_least_one_yaku(
-        self,
-        hand: List[Tile],
-        melds: List[Dict],
-        win_tile: Tile,
-        player: PlayerState,
-        game_state: GameState,
-        is_tsumo: bool,
-    ) -> bool:
-        """
-        检查手牌是否包含至少一番的役种。
-        这个方法不需要计算最终番数和点数，只需判断总役番数是否 >= 1。
-        """
-        # TODO: 实现役种判断的核心逻辑
-        # 这可能是 RulesEngine 中最复杂的逻辑之一
-        # 需要考虑的因素包括：
-        # 1. 手牌组合（平和、断幺九、一盃口、三色同顺、一气贯通、混全带幺九等）
-        # 2. 副露情况（门前清、对对和、三暗刻、三杠子、混老头、小三元、混一色、清一色等）
-        # 3. 荣和/自摸区别（门前清自摸和）
-        # 4. 荣和的牌（役牌、风牌）
-        # 5. 游戏状态（立直、一发、海底/河底、岭上、抢杠、宝牌、里宝牌、红宝牌）
-        # 6. 特殊役（七对子、国士无双）
-        # 7. 役满判断（国士无双十三面、四暗刻、大三元、字一色、清老头、绿一色、九莲宝灯、四风连打、大四喜、小四喜、四杠子、地和、天和、纯正九莲宝灯、四暗刻单骑）
-
-        # 一个常见的实现方式是：
-        # 1. 判断所有可能的基础役种（不含番数增加因素，如宝牌）
-        # 2. 计算基础役种的总 Han 数
-        # 3. 根据游戏状态（立直、一发、宝牌等）增加 Han 数
-        # 4. 判断最终总 Han 数是否 >= 1 (对于役满，通常直接返回 True)
-
-        # 需要获取宝牌信息：
-        # current_dora_tiles = game_state.wall.get_current_dora_tiles()
-        # 需要获取玩家状态：
-        # player.riichi_declared, player.ippatsu_chance, player.seat_wind
-        # 需要获取场风：
-        # game_state.round_wind
-
-        print(
-            "Warning: has_at_least_one_yaku is a placeholder, implement actual yaku logic."
-        )
-        # Placeholder: 假设永远有役 (错误!)
-        # 实际需要根据手牌和规则判断
-        # if self._calculate_total_han(hand, melds, win_tile, player, game_state, is_tsumo) >= 1:
-        #     return True
-        # return False
-        return True  # Placeholder: 暂时返回 True 以便代码结构跑通
+    
 
     # 检查振听的方法 (你需要实现它)
     def _is_furiten(
@@ -672,7 +627,7 @@ class RulesEngine:
 
         # 1. 检查是否和牌型 (基本形状)
         # check_win 只需要手牌和副露来判断形状
-        if not self.check_win(potential_hand, player.melds):
+        if not self._check_basic_win_shape(potential_hand, player.melds):
             # print(f"Debug: 玩家 {player.player_id} 荣和 {target_tile} 不满足和牌形状")
             return False
 
@@ -836,7 +791,7 @@ class RulesEngine:
         # 如果以 min_val 开头的刻子和顺子都无法成功构成剩余面子，则这条路失败
         return False
 
-    def check_win(self, hand_tiles: List[Tile], melds: List[Meld]) -> bool:
+    def _check_basic_win_shape(self, hand_tiles: List[Tile], melds: List[Meld]) -> bool:
         """
         检查给定的手牌和副露组合是否构成和牌型 (标准型、七对子、国士无双)。
 
@@ -981,7 +936,7 @@ class RulesEngine:
             # 假设用非赤牌测试 (通常足够判断是否听牌结构)
             test_tile = Tile(value=potential_tile_value, is_red=False)
             # 使用 check_win 判断加入这张牌后是否和牌
-            if self.check_win(hand_tiles + [test_tile], melds):
+            if self._check_basic_win_shape(hand_tiles + [test_tile], melds):
                 # print(f"Debug is_tenpai: 加入 {test_tile} 可和牌，判定为听牌。")
                 return True  # 只要有一种牌能和，就是听牌
 
@@ -1151,7 +1106,55 @@ class RulesEngine:
         )  # 假设 GameState/last_action_info 能判断
 
         return context
+    def has_at_least_one_yaku(
+        self,
+        hand: List[Tile],
+        melds: List[Dict],
+        win_tile: Tile,
+        player: PlayerState,
+        game_state: GameState,
+        is_tsumo: bool,
+    ) -> bool:
+        """
+        检查手牌是否包含至少一番的役种。
+        这个方法不需要计算最终番数和点数，只需判断总役番数是否 >= 1。
+        """
+        # TODO: 实现役种判断的核心逻辑
+        # 这可能是 RulesEngine 中最复杂的逻辑之一
+        # 需要考虑的因素包括：
+        # 1. 手牌组合（平和、断幺九、一盃口、三色同顺、一气贯通、混全带幺九等）
+        # 2. 副露情况（门前清、对对和、三暗刻、三杠子、混老头、小三元、混一色、清一色等）
+        # 3. 荣和/自摸区别（门前清自摸和）
+        # 4. 荣和的牌（役牌、风牌）
+        # 5. 游戏状态（立直、一发、海底/河底、岭上、抢杠、宝牌、里宝牌、红宝牌）
+        # 6. 特殊役（七对子、国士无双）
+        # 7. 役满判断（国士无双十三面、四暗刻、大三元、字一色、清老头、绿一色、九莲宝灯、四风连打、大四喜、小四喜、四杠子、地和、天和、纯正九莲宝灯、四暗刻单骑）
 
+        # 一个常见的实现方式是：
+        # 1. 判断所有可能的基础役种（不含番数增加因素，如宝牌）
+        # 2. 计算基础役种的总 Han 数
+        # 3. 根据游戏状态（立直、一发、宝牌等）增加 Han 数
+        # 4. 判断最终总 Han 数是否 >= 1 (对于役满，通常直接返回 True)
+
+        # 需要获取宝牌信息：
+        # current_dora_tiles = game_state.wall.get_current_dora_tiles()
+        # 需要获取玩家状态：
+        # player.riichi_declared, player.ippatsu_chance, player.seat_wind
+        # 需要获取场风：
+        # game_state.round_wind
+
+        print(
+            "Warning: has_at_least_one_yaku is a placeholder, implement actual yaku logic."
+        )
+        # Placeholder: 假设永远有役 (错误!)
+        # 实际需要根据手牌和规则判断
+        # if self._calculate_total_han(hand, melds, win_tile, player, game_state, is_tsumo) >= 1:
+        #     return True
+        # return False
+        return True  # Placeholder: 暂时返回 True 以便代码结构跑通
+    
+    def _analyze_win_for_scoring(self, game_state: "GameState", player_index: int, winning_tile: "Tile", is_tsumo: bool, ron_player_index: Optional[int] = None) -> Optional[WinDetails]:
+    
     def calculate_yaku_and_score(
         self,
         hand_tiles_final: List[Tile],  # 和牌时的14张牌 (含和牌)
