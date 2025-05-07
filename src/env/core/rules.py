@@ -34,6 +34,38 @@ GAME_LENGTH_MAX_WIND = {
     # 根据你需要支持的游戏长度调整
 }
 
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Any
+
+
+@dataclass
+class WinDetails:
+    """存储一次和牌的详细分析结果"""
+
+    is_valid_win: bool = False  # 是否是规则上允许的和牌 (例如，不是振听荣和)
+    winning_tile: Optional["Tile"] = None  # 和牌的那张牌对象
+    is_tsumo: bool = False  # 是否是自摸
+    yaku: List[str] = field(
+        default_factory=list
+    )  # 构成和牌的所有役种名称列表 (例如 ["Riichi", "Tsumo", "Pinfu"])
+    han: int = 0  # 总番数 (不含宝牌)
+    fu: int = 0  # 符数
+    is_yakuman: bool = False  # 是否是役满
+    yakuman_list: List[str] = field(
+        default_factory=list
+    )  # 役满名称列表 (例如 ["Kokushi Musou"])
+    dora_count: int = 0  # 宝牌数 (Dora + Red Dora + Ura Dora)
+    # TODO: 可能需要更多细节，例如宝牌指示牌、里宝牌指示牌、具体宝牌列表等
+
+    # 可能需要根据游戏规则添加其他标志，例如：
+    # is_menzen: bool = False # 是否门前清
+    # is_ippatsu: bool = False # 是否一发
+    # is_haitei: bool = False # 是否海底捞月
+    # is_houtei: bool = False # 是否河底捞鱼
+    # is_rinshan: bool = False # 是否岭上开花
+    # is_chankan: bool = False # 是否抢杠
+    # ...
+
 
 class RulesEngine:
     """
@@ -592,8 +624,6 @@ class RulesEngine:
 
         return True
 
-    
-
     # 检查振听的方法 (你需要实现它)
     def _is_furiten(
         self, player: PlayerState, win_tile: Tile, game_state: GameState
@@ -1106,6 +1136,7 @@ class RulesEngine:
         )  # 假设 GameState/last_action_info 能判断
 
         return context
+
     def has_at_least_one_yaku(
         self,
         hand: List[Tile],
@@ -1152,9 +1183,17 @@ class RulesEngine:
         #     return True
         # return False
         return True  # Placeholder: 暂时返回 True 以便代码结构跑通
-    
-    def _analyze_win_for_scoring(self, game_state: "GameState", player_index: int, winning_tile: "Tile", is_tsumo: bool, ron_player_index: Optional[int] = None) -> Optional[WinDetails]:
-    
+
+    def _analyze_win_for_scoring(
+        self,
+        game_state: "GameState",
+        player_index: int,
+        winning_tile: "Tile",
+        is_tsumo: bool,
+        ron_player_index: Optional[int] = None,
+    ) -> Optional[WinDetails]:
+        pass
+
     def calculate_yaku_and_score(
         self,
         hand_tiles_final: List[Tile],  # 和牌时的14张牌 (含和牌)
