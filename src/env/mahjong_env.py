@@ -1,7 +1,7 @@
 from typing import Dict
 
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 
 from src.env.core.game_state import GameState, Wall, GamePhase
@@ -89,8 +89,8 @@ class MahjongEnv(gym.Env):
     def _get_observation(self):
         """获取编码后的观察状态，包含候选动作信息"""
         return self.state_encoder.encode(
-            game_state=self.controller.game_state,
-            player_index=self.controller.game_state.current_player_index,
+            game_state=self.controller.gamestate,
+            player_index=self.controller.gamestate.current_player_index,
             candidate_actions=self.current_candidates,
         )
 
@@ -138,10 +138,10 @@ class MahjongEnv(gym.Env):
     def render(self, mode="human"):
         """渲染当前游戏状态"""
         if self.renderer:
-            return self.renderer.render(self.controller.game_state, mode=mode)
+            return self.renderer.render(self.controller.gamestate, mode=mode)
         elif mode == "text":
-            print(f"Current Phase: {self.controller.game_state.game_phase.name}")
-            print(f"Current Player: {self.controller.game_state.current_player_index}")
+            print(f"Current Phase: {self.controller.gamestate.game_phase.name}")
+            print(f"Current Player: {self.controller.gamestate.current_player_index}")
             print(f"Valid Actions: {len(self.current_candidates)} options")
         return None
 

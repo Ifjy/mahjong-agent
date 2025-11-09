@@ -1,5 +1,6 @@
-import gym
+import gymnasium as gym
 from src.env.mahjong_env import MahjongEnv
+
 
 def main():
     # 初始化环境
@@ -16,6 +17,7 @@ def main():
         action = env.action_space.sample()  # 随机动作
         obs, reward, done, info = env.step(action)
         print(f"Action: {action}, Reward: {reward}, Done: {done}")
+
 
 if __name__ == "__main__":
     main()
