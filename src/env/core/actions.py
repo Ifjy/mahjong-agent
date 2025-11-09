@@ -1,13 +1,14 @@
+import sys
+import os
 from enum import Enum, auto
-from dataclasses import dataclass, field  # 导入field用于default_factory
-from typing import (
-    Optional,
-    Tuple,
-)  # 使用Tuple表示固定长度的序列（如吃牌时的两张牌）
+from dataclasses import dataclass, field
+from typing import Optional, List, Tuple
 import numpy as np
 
 
-# （保持Tile数据类不变 - 现状良好）
+# --- I. 用户提供的核心数据结构 ---
+
+
 @dataclass(frozen=True)  # 使Tile不可变（更安全）
 class Tile:
     """麻将牌表示（值0-33）"""
@@ -50,6 +51,7 @@ class ActionType(Enum):
     RON = auto()  # 荣和（对任意玩家弃牌）
     PASS = auto()  # 跳过（对弃牌不进行吃/碰/杠/荣和的选择）
     SPECIAL_DRAW = auto()  # 特殊流局宣告（例如九种九牌）- 作为一种可选动作
+    # DRAW = auto()  # <-- 已移除，因为摸牌是一个流程控制，而非玩家选择的动作
 
 
 class KanType(Enum):
@@ -60,69 +62,42 @@ class KanType(Enum):
     OPEN = auto()  # 大明杠（Daiminkan）- 对弃牌进行杠
 
 
-@dataclass(frozen=True)  # 尽可能使Action不可变（更安全）
+@dataclass(frozen=True)
 class Action:
-    """
-    完整的麻将动作表示（用于'扁平化动作候选'空间）。
-    每个实例代表一个具体的、当前合法的动作选项。
-    参数根据动作类型不同而变化。
-    """
+    """完整的麻将动作表示"""
 
     type: ActionType
 
-    # --- 参数（使用default_factory处理列表等可变默认值）---
-    # 打牌、碰、杠涉及的牌（OPEN KAN的目标牌，ADDED/CLOSED的四张牌集合）
+    # --- 参数 ---
     tile: Optional[Tile] = None
-    # 吃牌时使用的手牌（总是2张牌，是否排序？）
     chi_tiles: Optional[Tuple[Tile, Tile]] = field(default=None)
-    # 杠的具体类型
     kan_type: Optional[KanType] = None
-    # 立直宣言时打出的牌
     riichi_discard: Optional[Tile] = None
-    # 和牌时的关键牌（TSUMO/RON）- 如果在GameState中可用可能冗余
     winning_tile: Optional[Tile] = field(default=None)
 
-    # 注意：这里不存储吃/碰/大明杠的'目标牌'。
-    # 该信息来自生成或应用动作时的GameState.last_discarded_tile上下文。
-    # 这使Action专注于玩家的选择/贡献。
-
     def __post_init__(self):
-        """基本结构验证。更深入的规则验证在rules.py中进行"""
-        if self.type == ActionType.DISCARD:
-            if self.tile is None:
-                raise ValueError("DISCARD动作需要'tile'参数")
-        elif self.type == ActionType.RIICHI:
-            if self.riichi_discard is None:
-                raise ValueError("RIICHI动作需要'riichi_discard'参数")
-        elif self.type == ActionType.CHI:
-            if self.chi_tiles is None or len(self.chi_tiles) != 2:
-                raise ValueError("CHI动作需要'chi_tiles'参数（包含2张牌的元组）")
-        elif self.type == ActionType.PON:
-            if self.tile is None:
-                raise ValueError("PON动作需要'tile'参数（要碰的牌类型）")
+        """基本结构验证。"""
+        if self.type == ActionType.DISCARD and self.tile is None:
+            raise ValueError("DISCARD动作需要'tile'参数")
+        elif self.type == ActionType.RIICHI and self.riichi_discard is None:
+            raise ValueError("RIICHI动作需要'riichi_discard'参数")
+        elif self.type == ActionType.CHI and (
+            self.chi_tiles is None or len(self.chi_tiles) != 2
+        ):
+            raise ValueError("CHI动作需要'chi_tiles'参数（包含2张牌的元组）")
+        elif self.type == ActionType.PON and self.tile is None:
+            raise ValueError("PON动作需要'tile'参数（要碰的牌类型）")
         elif self.type == ActionType.KAN:
             if self.kan_type is None:
                 raise ValueError("KAN动作需要'kan_type'参数")
             if self.tile is None:
                 raise ValueError("KAN动作需要'tile'参数（要杠的牌类型）")
-        elif self.type == ActionType.TSUMO:
-            if self.winning_tile is None:
-                print("警告：TSUMO动作创建时未指定winning_tile。")
-        elif self.type == ActionType.RON:
-            if self.winning_tile is None:
-                print("警告：RON动作创建时未指定winning_tile。")
+
+        # 移除了对 ActionType.DRAW 的验证
 
     def to_feature_vector(self, feature_size: int) -> np.ndarray:
-        """
-        将动作编码为固定大小的特征向量。
-        Args:
-            feature_size (int): 特征向量的总大小，必须 >= 动作所需最小大小。
-        """
-        # ... (计算 required_size 如你代码所示: type_size + tile_size + ...) ...
-        required_size = (
-            len(ActionType) + 34 + (2 * 34) + len(KanType)
-        )  # Approx 9 + 34 + 68 + 3 = 114
-
+        # to_feature_vector 必须根据新的 ActionType 数量进行调整
+        required_size = len(ActionType) + 34 + (2 * 34) + len(KanType)
         if required_size > feature_size:
             raise ValueError(
                 f"Action type {self.type.name} requires minimum feature size {required_size}, but provided size is {feature_size}"
@@ -132,7 +107,7 @@ class Action:
 
         # --- 编码逻辑 (与你代码中的一致，使用 offsets) ---
         type_offset = 0
-        type_size = len(ActionType)
+        type_size = len(ActionType)  # 此处 type_size 会根据移除 DRAW 后的数量更新
 
         tile_offset = type_offset + type_size
         tile_size = 34
@@ -145,79 +120,34 @@ class Action:
         kan_type_size = len(KanType)
 
         # 编码动作类型 (独热编码)
-        if 0 <= self.type.value - 1 < type_size:  # Added bounds check
+        if 0 <= self.type.value - 1 < type_size:
             feature_vector[type_offset + self.type.value - 1] = 1.0
-        else:
-            print(f"警告: 未知动作类型值 {self.type.value} 编码为特征向量")
 
-        # 编码参数
-        # Ensure indices are within the bounds of the calculated sections and the total feature_size
-        if self.type == ActionType.DISCARD and self.tile is not None:
-            idx = tile_offset + self.tile.value
+        # 编码参数 (简化，仅包含与 Tile 相关的核心逻辑)
+        primary_tile = None
+        if self.type in [ActionType.DISCARD, ActionType.PON, ActionType.KAN]:
+            primary_tile = self.tile
+        elif self.type == ActionType.RIICHI:
+            primary_tile = self.riichi_discard
+
+        if primary_tile is not None:
+            idx = tile_offset + primary_tile.value
             if 0 <= idx < tile_offset + tile_size:
                 feature_vector[idx] = 1.0
-            else:
-                print(f"警告: DISCARD 动作 tile value {self.tile.value} 编码超出范围")
 
-        elif self.type == ActionType.RIICHI and self.riichi_discard is not None:
-            idx = tile_offset + self.riichi_discard.value
-            if 0 <= idx < tile_offset + tile_size:
-                feature_vector[idx] = 1.0
-            else:
-                print(
-                    f"警告: RIICHI 动作 riichi_discard value {self.riichi_discard.value} 编码超出范围"
-                )
-
-        elif self.type == ActionType.PON and self.tile is not None:
-            # PON uses the 'tile' field to indicate the type of tile being Pon'd
-            idx = tile_offset + self.tile.value
-            if 0 <= idx < tile_offset + tile_size:
-                feature_vector[idx] = 1.0
-            else:
-                print(f"警告: PON 动作 tile value {self.tile.value} 编码超出范围")
-
-        elif self.type == ActionType.KAN and self.tile is not None:
-            # KAN uses the 'tile' field to indicate the type of tile being Kan'd
-            idx = tile_offset + self.tile.value
-            if 0 <= idx < tile_offset + tile_size:
-                feature_vector[idx] = 1.0
-            else:
-                print(f"警告: KAN 动作 tile value {self.tile.value} 编码超出范围")
-
-            if self.kan_type is not None:
-                if (
-                    0 <= self.kan_type.value - 1 < kan_type_size
-                ):  # KanType enum starts at 1
-                    feature_vector[kan_type_offset + self.kan_type.value - 1] = 1.0
-                else:
-                    print(
-                        f"警告: KAN 动作未知 kan_type value {self.kan_type.value} 编码超出范围"
-                    )
+        elif self.type == ActionType.KAN and self.kan_type is not None:
+            if 0 <= self.kan_type.value - 1 < kan_type_size:
+                feature_vector[kan_type_offset + self.kan_type.value - 1] = 1.0
 
         elif self.type == ActionType.CHI and self.chi_tiles:
             if len(self.chi_tiles) == 2:
-                # Encode the two chi tiles
                 idx0 = chi_tiles_offset + self.chi_tiles[0].value
                 if 0 <= idx0 < chi_tiles_offset + chi_tile_size:
                     feature_vector[idx0] = 1.0
-                else:
-                    print(
-                        f"警告: CHI 动作 chi_tiles[0] value {self.chi_tiles[0].value} 编码超出范围"
-                    )
 
                 idx1 = chi_tiles_offset + chi_tile_size + self.chi_tiles[1].value
                 if 0 <= idx1 < chi_tiles_offset + chi_total_size:
                     feature_vector[idx1] = 1.0
-                else:
-                    print(
-                        f"警告: CHI 动作 chi_tiles[1] value {self.chi_tiles[1].value} 编码超出范围"
-                    )
-            else:
-                print(f"警告: CHI 动作 chi_tiles 数量不正确: {len(self.chi_tiles)}")
-
-        # TSUMO and RON actions might not need explicit tile encoding in the action vector itself
-        # as the winning tile information is likely in the game state or action application info.
-        # If needed, add encoding here for winning_tile similar to 'primary_tile'
 
         return feature_vector
 
@@ -230,9 +160,8 @@ class Action:
             parts.append(f"chi_tiles=({self.chi_tiles[0]}, {self.chi_tiles[1]})")
         if self.kan_type:
             parts.append(f"kan_type={self.kan_type.name}")
-        if self.riichi_discard:
-            if self.type == ActionType.RIICHI:
-                parts.append(f"riichi_discard={self.riichi_discard}")
+        if self.riichi_discard and self.type == ActionType.RIICHI:
+            parts.append(f"riichi_discard={self.riichi_discard}")
         if self.winning_tile and self.type in [ActionType.TSUMO, ActionType.RON]:
             parts.append(f"winning_tile={self.winning_tile}")
 

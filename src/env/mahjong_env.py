@@ -4,8 +4,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 
-from src.env.core.game_state import GameState, Wall, GamePhase
-from src.env.core.rules.rules_engine import RulesEngine
+from src.env.core.game_state import GameState
 from src.env.core.GameController import GameController
 
 # from src.env.core.actions import Action
