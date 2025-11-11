@@ -1,0 +1,8 @@
+类/函数,函数头,职责描述
+Class,RulesEngine,"__init__(self, config: Dict)"
+Coordination,"generate_candidate_actions(self, game_state: GameState, player_index: int) -> List[Action]",委托 ActionValidator，合并自摸动作和响应动作列表，返回当前玩家所有合法动作。
+Flow,"determine_next_phase(self, game_state: GameState, executed_action: Action) -> GamePhase","根据已执行的动作 (Discard, Pon, Kan, Pass 等)，确定游戏应进入的下一个阶段 (WAITING_FOR_RESPONSE, PLAYER_DRAW, HAND_OUTCOME 等)。"
+Coordination,"determine_hand_outcome(self, game_state: GameState, final_action: Action) -> Dict[str, Any]",委托 Scoring，处理和牌/流局后的结果结算，包括分数计算。
+Flow,"determine_next_hand_state(self, game_state: GameState, hand_outcome: Dict[str, Any]) -> Dict[str, Any]",根据本局结果（连庄、散家和、流局），计算下一局的场风、局数、本场数等。
+Flow,"is_game_over(self, game_state: GameState) -> bool",检查总游戏是否结束（例如：有人被飞，或达到最大局数）。
+Utility,"resolve_response_priorities(self, declarations: Dict[int, Action], game_state: GameState) -> Tuple[Optional[Action], Optional[int]]",委托 ActionValidator.resolve_response_priorities，解决多玩家响应时的冲突。

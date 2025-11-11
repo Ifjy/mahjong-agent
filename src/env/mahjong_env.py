@@ -62,7 +62,9 @@ class MahjongEnv(gym.Env):
         # 在这里我们不假设返回值，而是从 Controller 的 GameState 中读取状态
 
         # 动作执行前先获取当前状态，用于奖励计算
-        old_score = self.controller.gamestate.players[action.player_index].score
+        old_score = self.controller.gamestate.players[
+            action.player_index
+        ].score  #!! 这里出错了 action没有 player_index 属性
 
         # Controller 会处理 action 和后续所有自动流程，直到下一个决策点
         self.controller.apply_action(action)
@@ -99,9 +101,11 @@ class MahjongEnv(gym.Env):
         current_player_idx = state.current_player_index
 
         # --- 改进点 3: 通过 Controller 访问 RulesEngine ---
-        self.current_candidates = self.controller.rules_engine.get_legal_actions(
-            game_state=state,
-            player_index=current_player_idx,
+        self.current_candidates = (
+            self.controller.rules_engine.generate_candidate_actions(
+                game_state=state,
+                player_index=current_player_idx,
+            )
         )
 
         # 生成动作掩码 (不变)
