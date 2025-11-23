@@ -43,7 +43,7 @@ class MahjongEnv(gym.Env):
             # 处理 seed (如果 Controller 支持)
             pass
 
-        self.controller.start_game()  # Controller 执行发牌等流程
+        self.controller.reset()  # Controller 执行发牌等流程
 
         info = self._get_info()
         observation = self._get_observation()
@@ -52,22 +52,24 @@ class MahjongEnv(gym.Env):
 
     def step(self, action_idx: int):
         """执行动作"""
-        # 1. 验证和获取动作对象
+        # 1. 获取当前行动的玩家 (Environment Knowledge)
+        # 这是解决问题的关键：环境知道现在轮到谁
+        current_player_idx = self.controller.gamestate.current_player_index
+
+        # 2. 验证和获取动作对象
         if not (0 <= action_idx < len(self.current_candidates)):
             raise ValueError(f"Invalid action index {action_idx}")
-        action = self.current_candidates[action_idx]
 
-        # 2. 核心：将动作对象交给 Controller 处理流程
-        # 假设 apply_action 返回 (reward_delta, hand_over_flag)
-        # 在这里我们不假设返回值，而是从 Controller 的 GameState 中读取状态
+        action = self.current_candidates[action_idx]  # Action 对象本身不含 player_index
 
-        # 动作执行前先获取当前状态，用于奖励计算
-        old_score = self.controller.gamestate.players[
-            action.player_index
-        ].score  #!! 这里出错了 action没有 player_index 属性
+        # 3. 动作执行前获取分数 (用于 Reward)
+        # 使用 current_player_idx 而不是 action.player_index
+        old_score = self.controller.gamestate.players[current_player_idx].score
 
-        # Controller 会处理 action 和后续所有自动流程，直到下一个决策点
-        self.controller.apply_action(action)
+        # 4. 核心：将动作交给 Controller
+        # Controller 的 step 方法签名是 (player_idx, action)
+        # 我们显式地传入 current_player_idx
+        self.controller.step(current_player_idx, action)
 
         # 3. 检查状态、计算奖励
         state = self.controller.gamestate

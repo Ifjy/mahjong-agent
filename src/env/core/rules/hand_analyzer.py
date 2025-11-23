@@ -8,9 +8,6 @@
 # Utility,"get_tile_counts(self, tiles: List[Tile]) -> Counter",快速计算牌的计数器。
 
 # hand_analyzer.py
-
-# hand_analyzer.py
-
 from typing import List, Set, Counter as TypingCounter, Dict, Optional, Any, Tuple
 from collections import Counter
 from dataclasses import dataclass, field
