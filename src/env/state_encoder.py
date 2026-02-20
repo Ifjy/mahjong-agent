@@ -1,5 +1,5 @@
 import numpy as np
-from gym.spaces import Box, Discrete, Dict, MultiBinary
+from gymnasium.spaces import Box, Dict
 from typing import List
 from src.env.core.actions import Action
 
@@ -12,8 +12,8 @@ class StateEncoder:
     def __init__(self, config):
         self.config = config
         self.tile_types = 34  # 基本牌型数量
-        self.max_actions = 100  # 最大候选动作数
-        self.action_feature_dim = config["action_feature_dim"]  # 动作特征维度
+        self.max_actions = config.get("max_actions", 100)  # 最大候选动作数
+        self.action_feature_dim = config.get("action_feature_dim", 128)  # 动作特征维度
 
     def encode(self, game_state, player_index, candidate_actions: List[Action] = None):
         """
@@ -126,8 +126,8 @@ class StateEncoder:
         """编码玩家副露"""
         encoded = np.zeros(self.tile_types, dtype=np.uint8)
         for meld in melds:
-            for tile in meld["tiles"]:
-                encoded[tile.value] += 1  # fix: use .value
+            for tile in meld.tiles:
+                encoded[tile.value] += 1
         return encoded
 
     def _encode_last_action(self, game_state):
