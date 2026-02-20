@@ -43,3 +43,17 @@ def test_env_step():
     assert isinstance(terminated, bool)
     assert isinstance(truncated, bool)
     assert isinstance(info, dict)
+
+
+def test_env_multi_step_smoke():
+    env = MahjongEnv(_config())
+    obs, info = env.reset()
+
+    for _ in range(30):
+        valid_actions = info["valid_actions"]
+        if len(valid_actions) == 0:
+            break
+        obs, reward, terminated, truncated, info = env.step(0)
+        assert not truncated
+        if terminated:
+            break

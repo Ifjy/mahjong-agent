@@ -26,6 +26,10 @@ from src.env.core.rules.constants import (
     DRAGON_GREEN,
     DRAGON_RED,
     MAN_1,
+    MAN_9,
+    PIN_1,
+    PIN_9,
+    SOU_1,
     SOU_9,
 )
 
@@ -222,53 +226,88 @@ class Scoring:
         self,
         win_details: "WinDetails",
         game_state: "GameState",
+        winner_index: int,
         loser_index: Optional[int],
     ) -> Dict[int, int]:
         """
         【RulesEngine调用的结算函数】
-        将点数转化为玩家间的支付。
+        将点数转化为玩家间的支付变动。
+
+        Args:
+            win_details: 和牌详情。
+            game_state: 当前游戏状态。
+            winner_index: 赢家索引。
+            loser_index: 放铳玩家索引（仅荣和有效）。
         """
         payout = {p.player_index: 0 for p in game_state.players}
 
-        # 获取赢家索引 (假设从 game_state.current_player_index 或 win_form 无法直接获取时，需传入)
-        # 这里假设 game_state.current_player_index 就是赢家 (对于 Tsumo)
-        # 或者如果是 Ron，需要 RulesEngine 传入 winner_index。
-        # 为了健壮性，我们假设调用此函数时，上下文已知。
-        # 这里简单起见，通过遍历寻找持有 hand 的玩家 (不推荐)，或者假设 RulesEngine 处理好了
-        # 更好的方式是让 WinDetails 携带 player_index，或者传入 winner_index
-        # 暂时 HACK: 假设 game_state.current_player_index 是赢家 (如果是自摸)
-        # 如果是荣和，赢家是响应者。
-        # **修正**：此函数应接收 winner_index，但在参数列表中未提供。
-        # 假设 win_details 上下文隐含了赢家，或者我们只能依赖外部调用逻辑正确。
-        # 实际上，RulesEngine 调用此函数时，上下文是明确的。
+        if winner_index not in payout:
+            raise ValueError(f"Invalid winner_index: {winner_index}")
 
-        # 我们假设调用者（RulesEngine）已经处理了 winner_index，
-        # 这里我们只计算金额，不负责分配给具体哪个 ID，除非传入了 winner_index。
-        # 为了修复逻辑，我们假设 payout 的 key 是相对的，或者需要传入 winner_index。
-        # 鉴于接口限制，我们假设 is_dealer 是从 context 传来的。
+        if win_details.is_tsumo:
+            # score_points 解释为总和牌点（已含子/亲差异），这里按基础点近似分摊
+            is_dealer = winner_index == game_state.dealer_index
+            if is_dealer:
+                per_player = max(100, self._ceil_to_100(win_details.score_points / 3))
+                for p in game_state.players:
+                    if p.player_index == winner_index:
+                        payout[p.player_index] += per_player * (game_state.num_players - 1)
+                    else:
+                        payout[p.player_index] -= per_player
+            else:
+                dealer_pay = max(100, self._ceil_to_100(win_details.score_points / 2))
+                non_dealer_pay = max(100, self._ceil_to_100(win_details.score_points / 4))
+                for p in game_state.players:
+                    if p.player_index == winner_index:
+                        payout[p.player_index] += dealer_pay + non_dealer_pay * (game_state.num_players - 2)
+                    elif p.player_index == game_state.dealer_index:
+                        payout[p.player_index] -= dealer_pay
+                    else:
+                        payout[p.player_index] -= non_dealer_pay
+        else:
+            if loser_index is None or loser_index not in payout:
+                raise ValueError("RON settlement requires a valid loser_index.")
+            payout[winner_index] += win_details.score_points
+            payout[loser_index] -= win_details.score_points
 
-        # **重要修复**：为了代码能跑，我们需要知道谁是赢家。
-        # 既然参数没传，我们假设 RulesEngine 会处理 payout 的分配，
-        # 这里只返回 {"winner": points, "loser": -points} 这种结构？
-        # 不，返回 Dict[int, int] 意味着必须知道 player_index。
-        # 让我们假设 win_details.win_form 虽然没存 player_index，但我们可以通过遍历 game_state.players 找到手牌匹配的人。
+        # 本场和立直棒处理（简化但可运行）
+        honba_bonus = game_state.honba * 300
+        if win_details.is_tsumo:
+            for p in game_state.players:
+                if p.player_index != winner_index:
+                    payout[p.player_index] -= game_state.honba * 100
+            payout[winner_index] += honba_bonus
+        elif loser_index is not None:
+            payout[loser_index] -= honba_bonus
+            payout[winner_index] += honba_bonus
 
-        winner_index = -1
-        for p in game_state.players:
-            # 简单比对：谁的手牌+和牌 == final_hand?
-            # 这不可靠。
-            # 正确做法：修改 get_final_score_and_payout 签名，增加 winner_index。
-            pass
+        if game_state.riichi_sticks > 0:
+            payout[winner_index] += game_state.riichi_sticks * 1000
 
-        # 这里暂时抛出异常，提示需要修改接口，或者在下面使用占位符
-        # raise NotImplementedError("Need winner_index to calculate payout")
+        return payout
 
-        # 临时方案：假设调用时 context 包含 winner_index
-        # 或者我们只计算点数，返回一个通用结构
-        pass
+    def calculate_ryuukyoku_penalty_tenpai(self, game_state: "GameState") -> Dict[int, int]:
+        """
+        荒牌流局罚符（3000点）分配。
+        听牌玩家平分获得，未听牌玩家平分支付。
+        """
+        payout = {p.player_index: 0 for p in game_state.players}
+        tenpai_players = [p for p in game_state.players if self.hand_analyzer.is_tenpai(p.hand, p.melds)]
+        noten_players = [p for p in game_state.players if p not in tenpai_players]
 
-        # ... (保留原有逻辑结构，但需注意上述问题)
-        return {}
+        if not tenpai_players or not noten_players:
+            return payout
+
+        total_penalty = 3000
+        gain_each = total_penalty // len(tenpai_players)
+        lose_each = total_penalty // len(noten_players)
+
+        for p in tenpai_players:
+            payout[p.player_index] += gain_each
+        for p in noten_players:
+            payout[p.player_index] -= lose_each
+
+        return payout
 
     # ======================================================================
     # == 内部辅助 (Internal Helpers) ==

@@ -20,7 +20,7 @@ from src.env.core.actions import Action, ActionType, Tile, KanType
 from src.env.core.rules.action_validator import ActionValidator
 from src.env.core.rules.scoring import Scoring
 from src.env.core.rules.hand_analyzer import HandAnalyzer
-from src.env.core.rules.constants import TERMINAL_HONOR_VALUES, ACTION_PRIORITY
+from src.env.core.rules.constants import TERMINAL_HONOR_VALUES, ACTION_PRIORITY, GAME_LENGTH_MAX_WIND, Wind
 
 # 假设常量定义在 constants.py
 # from .constants import ROUND_WIND_SOUTH, GAME_LENGTH_MAX_WIND
@@ -212,7 +212,7 @@ class RulesEngine:
 
             # 3. 委托计算最终得分和支付
             score_changes = self.scoring.get_final_score_and_payout(
-                win_details, game_state, loser_index
+                win_details, game_state, player_index, loser_index
             )
             outcome["score_changes"] = score_changes
 
@@ -224,10 +224,8 @@ class RulesEngine:
             )
 
         elif end_reason == "SPECIAL_DRAW":
-            # 特殊流局 (九种九牌等)
-            # TODO: 委托 Scoring 模块处理特殊流局罚符 (通常为 0，但需处理本场和立直棒)
-            # outcome["score_changes"] = self.scoring.calculate_ryuukyoku_penalty_special(game_state, action.type)
-            pass
+            # 特殊流局 (九种九牌等) 通常不进行听罚分配
+            outcome["score_changes"] = {p.player_index: 0 for p in game_state.players}
 
         return outcome
 
@@ -373,9 +371,8 @@ class RulesEngine:
                 return True
 
         # 2. 检查是否完成预定场数
-        # (假设 game_state 已经是下一局的状态)
-        # TODO: 从 config 加载 max_game_wind
-        max_game_wind = 1  # 假设是半庄 (Wind.SOUTH = 1)
+        game_length = self.game_rules_config.get("game_length", "hanchan")
+        max_game_wind = GAME_LENGTH_MAX_WIND.get(game_length, Wind.SOUTH).value
 
         if game_state.round_wind > max_game_wind:
             # print(f"Debug Game Over: 完成最后一场风 (南场)，游戏结束。")
