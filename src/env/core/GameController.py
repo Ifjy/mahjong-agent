@@ -272,7 +272,7 @@ class GameController:
 
     def _perform_rinshan_draw(self):
         """执行岭上摸牌 (杠后)"""
-        tile = self.wall.draw_rinshan_tile()  # 假设 Wall 有此方法
+        tile = self.wall.draw_replacement_tile()
 
         if tile is None:
             # 理论上岭上牌不够是极其罕见的，视为流局或异常
