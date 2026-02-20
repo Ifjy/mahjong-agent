@@ -1,3 +1,4 @@
+import random
 import sys
 from typing import List, Dict, Optional, Tuple
 
@@ -34,8 +35,10 @@ class GameController:
         # 存储当前等待响应的玩家及其声明的动作 {player_idx: Action}
         self.pending_responses: Dict[int, Action] = {}
 
-    def reset(self):
+    def reset(self, seed: Optional[int] = None):
         """重置整个游戏 (由 Env.reset 调用)"""
+        if seed is not None:
+            random.seed(seed)
         self.gamestate.reset_game()
         self._start_new_hand()
 

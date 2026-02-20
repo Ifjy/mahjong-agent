@@ -38,12 +38,8 @@ class MahjongEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         """重置环境并返回初始观察"""
-        # --- 改进点 2: reset 流程由 Controller 接管 ---
-        if seed is not None:
-            # 处理 seed (如果 Controller 支持)
-            pass
-
-        self.controller.reset()  # Controller 执行发牌等流程
+        super().reset(seed=seed)
+        self.controller.reset(seed=seed)  # Controller 执行发牌等流程
 
         info = self._get_info()
         observation = self._get_observation()

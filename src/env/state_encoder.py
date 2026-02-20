@@ -126,8 +126,8 @@ class StateEncoder:
         """编码玩家副露"""
         encoded = np.zeros(self.tile_types, dtype=np.uint8)
         for meld in melds:
-            for tile in meld["tiles"]:
-                encoded[tile.value] += 1  # fix: use .value
+            for tile in meld.tiles:
+                encoded[tile.value] += 1
         return encoded
 
     def _encode_last_action(self, game_state):
