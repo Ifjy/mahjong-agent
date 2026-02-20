@@ -23,9 +23,6 @@ from src.env.core.rules.scoring import Scoring
 # 假设从 constants.py 导入
 from src.env.core.rules.constants import TERMINAL_HONOR_VALUES, ACTION_PRIORITY
 
-# HACK: 占位符
-TERMINAL_HONOR_VALUES = set(range(27, 34)) | {0, 8, 9, 17, 18, 26}
-
 
 class ActionValidator:
     """
@@ -151,14 +148,7 @@ class ActionValidator:
 
         规则: Ron (any) > Pon/Kan (any) > Chi (next player)
         """
-        # HACK: 假设 ACTION_PRIORITY 已从 constants 导入
-        priority_map = {
-            ActionType.RON: 3,
-            ActionType.KAN: 2,
-            ActionType.PON: 2,
-            ActionType.CHI: 1,
-            ActionType.PASS: 0,
-        }
+        priority_map = ACTION_PRIORITY
 
         # 1. 检查 Ron (最高优先级)
         ron_declarations = {
@@ -341,8 +331,8 @@ class ActionValidator:
 
         # 2. 查找加杠 (Kakan)
         for meld in player.melds:
-            if meld["type"] == ActionType.PON:
-                pon_tile_value = meld["tiles"][0].value
+            if meld.type == ActionType.PON:
+                pon_tile_value = meld.tiles[0].value
                 for tile in full_hand_tiles:
                     if tile.value == pon_tile_value:
                         # TODO: 检查立直后加杠是否改变听牌
