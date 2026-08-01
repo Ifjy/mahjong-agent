@@ -1,3 +1,24 @@
+# 默认配置 —— 与代码实际读取的 config key 对齐
+# 详细 schema 见 docs/CONFIG_AND_RULESET.md
+
+game:
+  num_players: 4              # 玩家人数 (当前仅支持 4)
+  initial_score: 25000        # 初始点数
+
+ruleset:
+  use_red_fives: true         # 是否使用赤宝牌
+  allow_kuitan: false         # 是否允许食断 (副露断幺)
+  # 其它规则项见 docs/CONFIG_AND_RULESET.md (阶段1补全时启用)
+
+# 状态编码器配置 (StateEncoder 读取)
+state_encoder_config:
+  max_actions: 100            # 候选动作上限 (须与 Env.max_candidates 一致)
+  action_feature_dim: 128     # 动作特征维度 (最小需求 114)
+
+# 渲染配置
+render: false                 # 是否启用 Renderer
+
+# 训练配置 (阶段3 RL 时使用，当前 Env 不读取)
 training:
   episodes: 1000
   learning_rate: 0.001
@@ -5,7 +26,3 @@ training:
   batch_size: 64
   buffer_size: 10000
   target_update_freq: 10
-
-environment:
-  name: MahjongEnv
-  max_steps: 1000

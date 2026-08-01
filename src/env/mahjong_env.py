@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 
 import gymnasium as gym
 from gymnasium import spaces
@@ -17,16 +17,18 @@ class MahjongEnv(gym.Env):
 
     metadata = {"render.modes": ["human", "text"]}
 
-    def __init__(self, config):
+    def __init__(self, config=None):
         super().__init__()
-        self.config = config
-        self.max_candidates = 100  # 最大候选动作数
+        self.config = config or {}
+        # 最大候选动作数，须与 StateEncoder.max_actions 保持一致
+        encoder_config = self.config.get("state_encoder_config", {})
+        self.max_candidates = encoder_config.get("max_actions", 100)
 
         # 核心组件初始化
-        self.controller = GameController(config)
+        self.controller = GameController(self.config)
 
-        self.state_encoder = StateEncoder(config.get("state_encoder_config", {}))
-        self.renderer = Renderer(config) if config.get("render", False) else None
+        self.state_encoder = StateEncoder(encoder_config)
+        self.renderer = Renderer(self.config) if self.config.get("render", False) else None
 
         # 动作空间改为简单的离散空间
         self.action_space = spaces.Discrete(self.max_candidates)
@@ -98,11 +100,31 @@ class MahjongEnv(gym.Env):
         )
 
     def _get_info(self) -> Dict:
-        """生成包含合法动作掩码的info字典"""
-        state = self.controller.gamestate
-        current_player_idx = state.current_player_index
+        """生成包含合法动作掩码的info字典。
 
-        # --- 改进点 3: 通过 Controller 访问 RulesEngine ---
+        多智能体调度说明：
+        - PLAYER_DISCARD 阶段：current_player 是当前摸牌者，为其生成候选。
+        - WAITING_FOR_RESPONSE 阶段：需要除打牌者外的 3 人逐一响应。
+          此处找出第一个尚未响应且有合法动作的玩家，将其设为 current_player，
+          以便外层循环逐个询问响应者。Controller 在响应阶段不依赖
+          current_player_index（它通过 pending_responses 收集）。
+        """
+        from src.env.core.game_state import GamePhase
+
+        state = self.controller.gamestate
+
+        if state.game_phase == GamePhase.WAITING_FOR_RESPONSE:
+            current_player_idx = self._next_responder(state)
+            # 推进 current_player 到下一个响应者，使后续 step() 一致
+            if current_player_idx is not None:
+                state.current_player_index = current_player_idx
+            else:
+                # 所有响应者都已表态（理论上 Controller 应已收齐并推进，此处兜底）
+                current_player_idx = state.current_player_index
+        else:
+            current_player_idx = state.current_player_index
+
+        # 通过 Controller 访问 RulesEngine 生成候选动作
         self.current_candidates = (
             self.controller.rules_engine.generate_candidate_actions(
                 game_state=state,
@@ -110,7 +132,7 @@ class MahjongEnv(gym.Env):
             )
         )
 
-        # 生成动作掩码 (不变)
+        # 生成动作掩码
         self.action_mask = np.zeros(self.max_candidates, dtype=np.int8)
         valid_count = min(len(self.current_candidates), self.max_candidates)
         self.action_mask[:valid_count] = 1
@@ -121,6 +143,21 @@ class MahjongEnv(gym.Env):
             "current_player": current_player_idx,
             "current_phase": state.game_phase.name,
         }
+
+    def _next_responder(self, state) -> Optional[int]:
+        """在 WAITING_FOR_RESPONSE 阶段，找出第一个尚未响应（不在
+        controller.pending_responses 中）且非打牌者的玩家索引。
+        返回 None 表示所有响应者都已表态。"""
+        discarder = state.last_discard_player_index
+        pending = self.controller.pending_responses
+        for offset in range(1, state.num_players):
+            cand_idx = (discarder + offset) % state.num_players
+            if cand_idx == discarder:
+                continue
+            if cand_idx in pending:
+                continue  # 该玩家已响应
+            return cand_idx
+        return None
 
     def _calculate_reward(self, old_score: int, state: GameState) -> float:
         """

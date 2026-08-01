@@ -1,5 +1,5 @@
 import numpy as np
-from gymnasium.spaces import Box, Dict
+from gymnasium import spaces
 from typing import List
 from src.env.core.actions import Action
 
@@ -10,10 +10,11 @@ class StateEncoder:
     """
 
     def __init__(self, config):
-        self.config = config
+        self.config = config or {}
         self.tile_types = 34  # 基本牌型数量
-        self.max_actions = config.get("max_actions", 100)  # 最大候选动作数
-        self.action_feature_dim = config.get("action_feature_dim", 128)  # 动作特征维度
+        self.max_actions = self.config.get("max_actions", 100)  # 最大候选动作数
+        # 动作特征维度: 至少需要 len(ActionType)+34+2*34+len(KanType) = 9+34+68+3 = 114
+        self.action_feature_dim = self.config.get("action_feature_dim", 128)
 
     def encode(self, game_state, player_index, candidate_actions: List[Action] = None):
         """
@@ -126,42 +127,65 @@ class StateEncoder:
         """编码玩家副露"""
         encoded = np.zeros(self.tile_types, dtype=np.uint8)
         for meld in melds:
-            for tile in meld["tiles"]:
+            for tile in meld.tiles:  # Meld 是 dataclass，用属性访问
                 encoded[tile.value] += 1  # fix: use .value
         return encoded
 
     def _encode_last_action(self, game_state):
-        """编码最后动作"""
-        if not game_state.last_action_info:
-            return np.zeros(self.tile_types + 1, dtype=np.uint8)
-
+        """编码最后动作: [tile one-hot(34), player_idx]。
+        last_action_info 结构: {"player": idx, "type": str, "action_obj": Action}
+        tile 需从 action_obj 提取 (DISCARD.tile / RIICHI.riichi_discard / PON.tile / KAN.tile 等)。
+        """
         encoded = np.zeros(self.tile_types + 1, dtype=np.uint8)
-        if "tile" in game_state.last_action_info:
-            encoded[game_state.last_action_info["tile"].value] = 1  # fix: use .value
-        encoded[-1] = game_state.last_action_info.get("player", 0)
+        info = game_state.last_action_info
+        if not info:
+            return encoded
+
+        action_obj = info.get("action_obj")
+        if action_obj is not None:
+            # 从 Action 对象中提取关联的 tile (不同动作类型字段不同)
+            tile = None
+            if action_obj.type.name in ("DISCARD", "PON", "KAN"):
+                tile = action_obj.tile
+            elif action_obj.type.name == "RIICHI":
+                tile = action_obj.riichi_discard
+            elif action_obj.type.name in ("TSUMO", "RON"):
+                tile = action_obj.winning_tile
+            elif action_obj.type.name == "CHI":
+                tile = action_obj.tile  # 被吃的牌 (若存在)
+
+            if tile is not None and hasattr(tile, "value"):
+                encoded[tile.value] = 1
+
+        encoded[-1] = info.get("player", 0)
         return encoded
 
     def get_observation_space(self):
         """定义观察空间"""
-        return Dict(
+        return spaces.Dict(
             {
-                "state": Dict(
+                "state": spaces.Dict(
                     {
-                        "hand": Box(0, 4, (self.tile_types,), dtype=np.uint8),
-                        "melds": Box(0, 4, (self.tile_types,), dtype=np.uint8),
-                        "discards": Box(0, 4, (4, self.tile_types), dtype=np.uint8),
-                        "dora": Box(0, 4, (self.tile_types,), dtype=np.uint8),
-                        "wind": Box(0, 3, (2,), dtype=np.uint8),
-                        "game_progress": Box(0, 100, (4,), dtype=np.uint16),
-                        "last_action": Box(
+                        "hand": spaces.Box(0, 4, (self.tile_types,), dtype=np.uint8),
+                        "melds": spaces.Box(0, 4, (self.tile_types,), dtype=np.uint8),
+                        "discards": spaces.Box(
+                            0, 4, (4, self.tile_types), dtype=np.uint8
+                        ),
+                        "dora": spaces.Box(0, 4, (self.tile_types,), dtype=np.uint8),
+                        "wind": spaces.Box(0, 3, (2,), dtype=np.uint8),
+                        "game_progress": spaces.Box(0, 100, (4,), dtype=np.uint16),
+                        "last_action": spaces.Box(
                             0, 3, (self.tile_types + 1,), dtype=np.uint8
                         ),
-                        "scores": Box(-100000, 100000, (4,), dtype=np.int32),
+                        "scores": spaces.Box(-100000, 100000, (4,), dtype=np.int32),
                     }
                 ),
-                "action_candidates": Box(
-                    0, 1, (self.max_actions, self.action_feature_dim), dtype=np.float32
+                "action_candidates": spaces.Box(
+                    0,
+                    1,
+                    (self.max_actions, self.action_feature_dim),
+                    dtype=np.float32,
                 ),
-                "action_mask": Box(0, 1, (self.max_actions,), dtype=np.int8),
+                "action_mask": spaces.Box(0, 1, (self.max_actions,), dtype=np.int8),
             }
         )

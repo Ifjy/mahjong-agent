@@ -197,7 +197,7 @@ class Renderer:
                 for meld in player.melds:
                     meld_parts = []
                     # 渲染副露中的牌并添加dora标记
-                    for tile in meld["tiles"]:  # meld["tiles"] 应该是一个 Tile 列表
+                    for tile in meld.tiles:  # Meld 是 dataclass，用属性访问
                         tile_str = self._get_tile_string(tile)
                         if tile.value in dora_values:
                             tile_str += "d"  # 如果是宝牌，添加 'd' 标记

@@ -290,6 +290,7 @@ class GameState:
         self.honba: int = 0  # 本场数
         self.riichi_sticks: int = 0  # 场上立直棒数
         self.dealer_index: int = 0  # 当前庄家索引
+        self.initial_dealer_index: int = 0  # 东1局的庄家索引 (固定为0，用于场风推进判断)
 
         # --- 核心状态指针 (由 GameController 更新) ---
         self.current_player_index: int = 0
@@ -299,6 +300,7 @@ class GameState:
         self.last_discarded_tile: Optional["Tile"] = None  # 最近一次打出的牌
         self.last_discard_player_index: int = -1  # 最近一次打牌的玩家索引
         self.last_action_info: Optional[Dict] = None  # 上一个被应用动作的信息
+        self.last_draw_was_rinshan: bool = False  # 上一次摸牌是否为岭上摸牌 (杠后)，供 Scoring 判定岭上开花
 
         # --- 局/游戏结束标记 ---
         self._hand_over_flag: bool = False  # 内部标记: 当前局是否结束?
@@ -349,6 +351,7 @@ class GameState:
             "type": "PASS",  # 假设有 ActionType.PASS
             "info": "NEW_HAND_RESET",
         }
+        self.last_draw_was_rinshan = False
         self._hand_over_flag = False
         self.turn_number = 0  # 设为0，第一次摸牌时(DRAW动作)再+1
 
@@ -413,7 +416,7 @@ class GameState:
 
             # 更新振听状态 (舍牌振听)
             # (逻辑：如果听牌，且打出的牌是听的牌，则振听)
-            # TODO: self._update_furiten_status(player)
+            # TODO: 振听判定由 Scoring._is_furiten 负责，详见 YAKU_AND_SCORING_DESIGN §7
 
         # ==================================================================
         # 2. 立直 (RIICHI)
@@ -513,26 +516,22 @@ class GameState:
         ):
 
             if action.kan_type == KanType.CLOSED:
-                # 暗杠：从手牌移除 4 张
+                # 暗杠：从手牌(含 drawn_tile)移除 4 张同 value
                 target_tile = action.tile
-                # 包含摸到的牌
-                full_hand = player.hand + (
-                    [player.drawn_tile] if player.drawn_tile else []
-                )
+                drawn = player.drawn_tile  # 先记录原始引用，避免置 None 后丢失
+                full_hand = player.hand + ([drawn] if drawn else [])
                 found = [t for t in full_hand if t.value == target_tile.value][:4]
 
-                # 移除 (需要处理 drawn_tile)
-                if player.drawn_tile in found:
+                # 若 drawn_tile 在 found 中，先清掉 drawn_tile 标记
+                if drawn is not None and drawn in found:
                     player.drawn_tile = None
-                    found.remove(player.drawn_tile)  # 剩下的从 hand 移
+                    # found 里剩余的 Tile 实例都来自 player.hand，交给下方统一移除
                 self._remove_tiles_from_hand(player, found)
 
-                # 创建副露 (暗杠 from_player = 自己)
+                # 创建副露 (暗杠 from_player = 自己，4张)
                 new_meld = Meld(
                     type=ActionType.KAN,
-                    tiles=tuple(
-                        found + ([player.drawn_tile] if player.drawn_tile else [])
-                    ),  # 4张
+                    tiles=tuple(found),  # found 即为这 4 张
                     from_player=player_idx,
                     called_tile=None,
                 )
@@ -603,48 +602,6 @@ class GameState:
         """任何鸣牌都会消除所有人的“一发”机会"""
         for p in self.players:
             p.ippatsu_chance = False
-
-    # --- 以下是纯数据操作的私有辅助方法 (应保留) ---
-
-    def _apply_kan_tile_removal(self, player, action: "Action"):
-        """[数据] 纯数据操作：根据 action.kan_type 从手牌或 melds 移除牌"""
-        if action.kan_type == "KanType.CLOSED":
-            # 从手牌移除4张 (假设 action.tiles 包含要移除的4张)
-            if not self._remove_tiles_from_hand(player, action.tiles):
-                print(f"严重错误: apply_action(CLOSED_KAN) 无法移除 {action.tiles}")
-        elif action.kan_type == "KanType.ADDED":
-            # 从手牌移除1张 (假设 action.tile 是要加的那张)
-            if not self._remove_tiles_from_hand(player, [action.tile]):
-                print(f"严重错误: apply_action(ADDED_KAN) 无法移除 {action.tile}")
-
-            # 更新旧的 PONG meld
-            for meld in player.melds:
-                # 假设 meld 是对象，有 .type 和 .tiles 属性
-                if (
-                    meld.type == "ActionType.PON"
-                    and meld.tiles[0].value == action.tile.value
-                ):
-                    meld.type = "ActionType.KAN"
-                    meld.tiles.append(action.tile)
-                    break
-
-    def _apply_meld_tile_removal(self, player, action: "Action"):
-        """[数据] 纯数据操作：为 CHI, PON, OPEN_KAN 移牌"""
-        # 假设 action 知道要从手牌移哪些
-        tiles_to_remove = action.get_tiles_from_hand()
-        if not self._remove_tiles_from_hand(player, tiles_to_remove):
-            print(f"严重错误: apply_action(MELD) 无法移除 {tiles_to_remove}")
-
-    def _clear_ippatsu_for_all_others(self, current_player_idx):
-        """[数据] 纯数据操作：清除所有*其他*玩家的一发机会"""
-        for i, p in enumerate(self.players):
-            if i != current_player_idx:
-                p.ippatsu_chance = False
-
-    def _update_furiten_status(self, player):
-        """[数据] 纯数据操作：更新玩家的振听状态"""
-        # TODO: 实现振听逻辑 (检查弃牌堆和听牌)
-        pass
 
     def _remove_tiles_from_hand(
         self, player: PlayerState, tiles_to_remove: List[Tile]

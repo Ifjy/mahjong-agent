@@ -23,7 +23,7 @@ def main():
             # 即使需要分步渲染，也应在 reset 内部实现。
         },
         "state_encoder_config": {
-            "max_actions": 30,
+            "max_actions": 100,
             "action_feature_dim": 128,
         },
         "human_player_id": 0,  # 例如，让玩家0由人类控制

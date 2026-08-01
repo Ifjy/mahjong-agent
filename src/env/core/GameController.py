@@ -268,11 +268,15 @@ class GameController:
         current_player = self.gamestate.players[self.gamestate.current_player_index]
         current_player.hand.append(tile)
         current_player.drawn_tile = tile
+        self.gamestate.last_draw_was_rinshan = False  # 常规摸牌，清除岭上标记
         self.gamestate.game_phase = GamePhase.PLAYER_DISCARD
 
     def _perform_rinshan_draw(self):
         """执行岭上摸牌 (杠后)"""
-        tile = self.wall.draw_replacement_tile()
+        # 杠后翻新宝牌指示牌 (王牌区拆一张指示牌)
+        self.wall.reveal_new_dora()
+
+        tile = self.wall.draw_replacement_tile()  # 杠后从王牌区摸岭上牌
 
         if tile is None:
             # 理论上岭上牌不够是极其罕见的，视为流局或异常
@@ -282,8 +286,8 @@ class GameController:
         current_player = self.gamestate.players[self.gamestate.current_player_index]
         current_player.hand.append(tile)
         current_player.drawn_tile = tile
-        # 标记为岭上开花上下文 (供 RulesEngine 使用)
-        # self.gamestate.context.is_rinshan = True
+        # 标记为岭上摸牌上下文 (供 RulesEngine/Scoring 判定岭上开花使用)
+        self.gamestate.last_draw_was_rinshan = True
         self.gamestate.game_phase = GamePhase.PLAYER_DISCARD
 
     def _advance_to_next_turn(self):
