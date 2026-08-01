@@ -523,29 +523,33 @@ class GameState:
             if action.kan_type == KanType.CLOSED:
                 # 暗杠：从手牌(含 drawn_tile)移除 4 张同 value
                 target_tile = action.tile
-                drawn = player.drawn_tile  # 先记录原始引用，避免置 None 后丢失
-                full_hand = player.hand + ([drawn] if drawn else [])
-                found = [t for t in full_hand if t.value == target_tile.value][:4]
-
-                # 校验: 必须找到 4 张, 否则状态不一致
-                if len(found) != 4:
+                target_val = target_tile.value
+                drawn = player.drawn_tile
+                # drawn_tile 是否参与暗杠 (按 value 判断, 不用 is —— 实例身份不可靠)
+                drawn_in = drawn is not None and drawn.value == target_val
+                # hand 中该 value 的张数
+                hand_count = sum(1 for t in player.hand if t.value == target_val)
+                need_from_hand = 3 if drawn_in else 4
+                if hand_count < need_from_hand:
                     raise RuntimeError(
-                        f"apply_action(CLOSED_KAN): 手牌中 {target_tile} 不足 4 张 (仅 {len(found)})"
+                        f"apply_action(CLOSED_KAN): 手牌中 {target_tile} 不足 "
+                        f"(需 {need_from_hand}, 实际 {hand_count})"
                     )
-                # 若 drawn_tile 在 found 中，先清掉 drawn_tile 标记
-                if drawn is not None and drawn in found:
+                # 从 hand 移除 need_from_hand 张 (取前 N 张同 value 实例)
+                to_remove = [t for t in player.hand if t.value == target_val][:need_from_hand]
+                if not self._remove_tiles_from_hand(player, to_remove):
+                    raise RuntimeError(
+                        f"apply_action(CLOSED_KAN): 无法从手牌移除 {[str(t) for t in to_remove]}"
+                    )
+                # 若 drawn 参与暗杠, 清掉 drawn_tile 标记
+                if drawn_in:
                     player.drawn_tile = None
-                # 从 player.hand 移除 (drawn_tile 已单独处理, 不在 hand 中)
-                from_hand = [t for t in found if t is not drawn]
-                if not self._remove_tiles_from_hand(player, from_hand):
-                    raise RuntimeError(
-                        f"apply_action(CLOSED_KAN): 无法从手牌移除 {[str(t) for t in from_hand]}"
-                    )
 
-                # 创建副露 (暗杠 from_player = 自己，4张)
+                # 创建副露 (暗杠 from_player = 自己，4张 = hand移除的 + drawn)
+                kan_tiles = tuple(to_remove) + ((drawn,) if drawn_in else ())
                 new_meld = Meld(
                     type=ActionType.KAN,
-                    tiles=tuple(found),  # found 即为这 4 张
+                    tiles=kan_tiles,  # 4 张
                     from_player=player_idx,
                     called_tile=None,
                 )
