@@ -152,6 +152,12 @@ class GameController:
             self.gamestate.game_phase = GamePhase.WAITING_FOR_RESPONSE
             self.pending_responses.clear()  # 清空上一轮
 
+            # 途中流局检测: 四风连打 / 四家立直 (打牌后立即判定)
+            abort_reason = self._check_abortive_draw()
+            if abort_reason:
+                self._process_hand_outcome(end_reason=abort_reason)
+                return
+
         else:
             raise RuntimeError(
                 f"Unexpected next phase from PLAYER_DISCARD: {next_phase}"
@@ -172,6 +178,12 @@ class GameController:
             return  # 等待其他人
 
         # 3. 所有人都响应了 -> 解决优先级
+        # 三家和途中流局: 3家以上 RON 同一张牌
+        ron_count = sum(1 for a in self.pending_responses.values() if a.type == ActionType.RON)
+        if ron_count >= 3:
+            self._process_hand_outcome(end_reason="ABORTIVE_DRAW")
+            return
+
         winning_action, winner_idx = self.rules_engine.resolve_response_priorities(
             self.pending_responses, self.gamestate
         )
@@ -202,6 +214,41 @@ class GameController:
             player.temporary_furiten = True
             if player.riichi_declared:
                 player.riichi_furiten = True
+
+    def _check_abortive_draw(self) -> Optional[str]:
+        """
+        途中流局检测 (打牌后/杠后调用)。返回 end_reason 或 None。
+        - 四风连打: 第1巡, 4家打出同一风牌 (27-30)。
+        - 四家立直: 4家全部 riichi_declared 且成立。
+        - 四杠散了: 场上杠总数 == 4 (在杠完成后, 下家摸牌前)。
+        三家和在 _handle_response_phase 的响应收齐时单独判定。
+        """
+        gs = self.gamestate
+        # 四家立直
+        if all(p.riichi_declared for p in gs.players):
+            return "ABORTIVE_DRAW"
+        # 四杠散了 (杠完成后场上4杠)
+        total_kans = sum(
+            1 for p in gs.players for m in p.melds if m.type == ActionType.KAN
+        )
+        if total_kans >= 4:
+            return "ABORTIVE_DRAW"
+        # 四风连打 (第1巡: turn_number<=1 且门清)
+        if gs.turn_number <= 1 and all(p.is_menzen for p in gs.players):
+            # 本巡4家弃牌是否同一风牌
+            if all(len(p.discards) >= 1 for p in gs.players):
+                first = gs.players[gs.dealer_index].discards[0].value
+                if 27 <= first <= 30:
+                    # 按庄家起顺序检查4家首弃
+                    ok = True
+                    for i in range(gs.num_players):
+                        idx = (gs.dealer_index + i) % gs.num_players
+                        if not gs.players[idx].discards or gs.players[idx].discards[0].value != first:
+                            ok = False
+                            break
+                    if ok:
+                        return "ABORTIVE_DRAW"
+        return None
 
     def _execute_response(self, player_idx: int, action: Action):
         """执行获胜的响应动作"""
@@ -243,6 +290,15 @@ class GameController:
 
             # Case 1: 动作处理 (例如：杠后摸岭上牌)
             if phase == GamePhase.ACTION_PROCESSING:
+                # 四杠散了途中流局: 杠完成后场上4杠, 下家摸牌前判定
+                # (若该玩家可岭上自摸则先让他和, 此处简化为直接流局)
+                total_kans = sum(
+                    1 for p in self.gamestate.players
+                    for m in p.melds if m.type == ActionType.KAN
+                )
+                if total_kans >= 4:
+                    self._process_hand_outcome(end_reason="ABORTIVE_DRAW")
+                    break
                 self._perform_rinshan_draw()
                 # 摸完岭上牌后，自动切回 PLAYER_DISCARD，循环继续，等待玩家出牌
                 continue

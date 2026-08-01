@@ -302,3 +302,4 @@ scoring.is_valid_win(player, winning_tile, is_tsumo, game_state) -> bool
 | 2026-08-01 | v1 初稿，役种全集 + 符/点/振听蓝图 |
 | 2026-08-01 | v1 实现：役种22+役满11、符数、支付、舍牌振听、context补全 |
 | 2026-08-02 | v2 实现同巡振听 + 立直振听（PlayerState 新增 temporary_furiten/riichi_furiten，Controller PASS 时标记） |
+| 2026-08-02 | v3 实现流局满贯(近似)、罚符Chombo、飞人config(tobi_rule)、役满细节(国士十三面/真九莲/大车轮) |

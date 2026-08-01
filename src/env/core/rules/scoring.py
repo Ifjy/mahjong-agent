@@ -302,10 +302,31 @@ class Scoring:
 
     def calculate_ryuukyoku_penalty_tenpai(self, game_state: "GameState") -> Dict[int, int]:
         """
-        荒牌流局罚符（3000点）分配。
-        听牌玩家平分获得，未听牌玩家平分支付。
+        荒牌流局罚符（3000点）分配 + 流局满贯判定。
+        - 流局满贯 (近似): 某玩家弃牌河全是幺九字牌 -> 该玩家获满贯点数(8000),
+          由其它玩家分摊。注: 准确规则要求弃牌河中牌均未被鸣, 当前无被鸣追踪,
+          此处近似为"全幺九字即流局满贯", 保守偏宽。
+        - 否则: 听牌玩家平分3000, 未听牌玩家平分支付。
         """
         payout = {p.player_index: 0 for p in game_state.players}
+
+        # 流局满贯检测 (近似)
+        mangan_players = []
+        for p in game_state.players:
+            if p.discards and all(t.value in TERMINAL_HONOR_VALUES for t in p.discards):
+                mangan_players.append(p)
+        if mangan_players:
+            # 每个流局满贯者获 8000 (庄家) 或由其它3家分摊
+            for winner in mangan_players:
+                is_dealer = winner.player_index == game_state.dealer_index
+                base = 8000 if is_dealer else 8000
+                others = [p for p in game_state.players if p.player_index != winner.player_index]
+                share = self._ceil_to_100(base / len(others))
+                for p in others:
+                    payout[p.player_index] -= share
+                payout[winner.player_index] += sum(share for _ in others)
+            return payout
+
         tenpai_players = [p for p in game_state.players if self.hand_analyzer.is_tenpai(p.hand, p.melds)]
         noten_players = [p for p in game_state.players if p not in tenpai_players]
 
@@ -410,13 +431,18 @@ class Scoring:
         if context.get("is_chiihou"):
             yakuman_list.append("Chiihou")
 
-        # —— 国士无双 (13幺九字) ——
+        # —— 国士无双 / 国士十三面 (13幺九字) ——
         terminal_honors_in_hand = {v for v in value_set if v in TERMINAL_HONOR_VALUES}
         if is_menzen and len(hand) == 14 and terminal_honors_in_hand == TERMINAL_HONOR_VALUES:
-            # 13种齐全, 恰好1种2张
             th_counts = {v: value_counts[v] for v in TERMINAL_HONOR_VALUES}
             if all(c >= 1 for c in th_counts.values()) and sum(c == 2 for c in th_counts.values()) == 1:
-                yakuman_list.append("Kokushi")
+                # 区分十三面: 若和牌的那张(winning_tile)是唯一的对子, 则为十三面单骑
+                wt = context.get("winning_tile")
+                pair_val = next((v for v, c in th_counts.items() if c == 2), None)
+                if wt is not None and pair_val is not None and wt.value == pair_val:
+                    yakuman_list.append("Kokushi 13-sided")
+                else:
+                    yakuman_list.append("Kokushi")
 
         # 以下役满基于"4面子1雀头"结构 (需 caller 传 form, 这里用近似: 统计刻子数)
         # 为准确判定, 役满结构性判定放到 _find_yakuman_for_form 中由 caller 对每个 form 调用。
@@ -497,22 +523,31 @@ class Scoring:
         ):
             yaku.append("Chinroutou")
 
-        # —— 九莲宝灯 (门清, 同花 1112345678999 + 任1) ——
+        # —— 九莲宝灯 / 真九莲 (门清, 同花 1112345678999 + 任1) ——
         if is_menzen and form.hand_type == "standard" and len(form.all_tiles) == 14:
             suit = self._tiles_single_suit(form.all_tiles)
             if suit is not None:
-                base = [4, 1, 1, 1, 1, 1, 1, 1, 4]  # 1,9 各4; 2-8 各1 是九莲基本形
+                # 九莲基本形: 1112345678999 (1,9 各3; 2-8 各1) = 13张
+                base = [3, 1, 1, 1, 1, 1, 1, 1, 3]
                 counts = [0] * 9
                 for t in form.all_tiles:
                     counts[t.value - suit] += 1
-                if all(counts[i] >= base[i] for i in range(9)):
-                    # 真九莲: 单骑和 (听的是补回基本形的那张, 即多出的那张)
-                    wt = context.get("winning_tile")
-                    # 简化: 若多出一张(总数14, 基本13+1), 视为真九莲
-                    diff = sum(counts[i] - base[i] for i in range(9))
-                    if diff >= 1 and wt is not None:
-                        # 多出的那张在和牌位 -> 九莲
+                # 14张: 基本形13 + 多1张(任意同花)
+                extra = sum(counts[i] - base[i] for i in range(9))
+                wt = context.get("winning_tile")
+                if extra == 1 and all(counts[i] >= base[i] for i in range(9)):
+                    # 真九莲: 多出的那张就是 winning_tile (即和牌前是纯基本形, 单骑听全部)
+                    if wt is not None and counts[wt.value - suit] == base[wt.value - suit] + 1:
+                        yaku.append("Chuuren Poutou True")  # 真九莲
+                    else:
                         yaku.append("Chuuren Poutou")
+
+        # —— 大车轮 (规则可选: 222-888筒 七对, 门清) ——
+        if is_menzen and form.hand_type == "chiitoitsu":
+            bin_vals = {t.value for t in form.all_tiles}
+            # 2-8筒 即 value 10-16
+            if bin_vals == {10, 11, 12, 13, 14, 15, 16}:
+                yaku.append("Dai-sharin")
 
         return yaku
 

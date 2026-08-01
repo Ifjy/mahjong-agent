@@ -207,7 +207,10 @@ class RulesEngine:
             # 2. 检查和牌是否合法 (由 Scoring 内部处理)
             if not win_details.is_valid_win:
                 outcome["end_type"] = "INVALID_WIN"
-                # TODO: 处理罚符 (Chombo) 逻辑
+                # 罚符 (Chombo): 犯规者(声明和牌者)支付罚符给其他玩家
+                outcome["score_changes"] = self._calculate_chombo_penalty(
+                    game_state, player_index
+                )
                 return outcome
 
             # 3. 委托计算最终得分和支付
@@ -382,20 +385,41 @@ class RulesEngine:
         **此函数在 determine_next_hand_state *之后* 调用，**
         **检查的是 *下一局* 的状态是否超限。**
         """
-        # 1. 检查是否有人被飞
-        for player in game_state.players:
-            if player.score < 0:
-                # print(f"Debug Game Over: 玩家 {player.player_index} 分数飞了")
+        # 1. 检查是否有人被飞 (config: tobi_rule = any/dealer_only/none)
+        tobi_rule = self.game_rules_config.get("tobi_rule", "any")
+        if tobi_rule == "any":
+            for player in game_state.players:
+                if player.score < 0:
+                    return True
+        elif tobi_rule == "dealer_only":
+            if game_state.players[game_state.dealer_index].score < 0:
                 return True
+        # tobi_rule == "none": 不因负分终局
 
         # 2. 检查是否完成预定场数
         game_length = self.game_rules_config.get("game_length", "hanchan")
         max_game_wind = GAME_LENGTH_MAX_WIND.get(game_length, Wind.SOUTH).value
 
         if game_state.round_wind > max_game_wind:
-            # print(f"Debug Game Over: 完成最后一场风 (南场)，游戏结束。")
             return True
 
-        # TODO: 处理复杂的终局条件 (如南四局庄家和牌不结束等)
+        # TODO: 西入 (extensions) 与南四局庄家和牌不结束等终局细则
 
         return False
+
+    def _calculate_chombo_penalty(
+        self, game_state: "GameState", offender_index: int
+    ) -> Dict[int, int]:
+        """
+        罚符 (Chombo): 犯规者向其他玩家支付罚符。
+        简化规则: 庄家犯规付 12000, 闲家犯规付 8000, 其它玩家均分。
+        """
+        payout = {p.player_index: 0 for p in game_state.players}
+        is_dealer = offender_index == game_state.dealer_index
+        penalty = 12000 if is_dealer else 8000
+        others = [p for p in game_state.players if p.player_index != offender_index]
+        share = penalty // len(others)
+        for p in others:
+            payout[p.player_index] += share
+        payout[offender_index] -= share * len(others)
+        return payout
