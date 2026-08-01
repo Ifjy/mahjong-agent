@@ -483,7 +483,12 @@ class GameState:
                 tiles_to_remove = found
                 meld_tiles = [self.last_discarded_tile] + tiles_to_remove
 
-            self._remove_tiles_from_hand(player, tiles_to_remove)
+            # 校验移除成功 (失败说明状态与动作不一致, 必须暴露而非静默膨胀手牌)
+            if not self._remove_tiles_from_hand(player, tiles_to_remove):
+                raise RuntimeError(
+                    f"apply_action({action.type.name}): 无法从手牌移除 {[str(t) for t in tiles_to_remove]}, "
+                    f"手牌张数={len(player.hand)}"
+                )
 
             # 2. 创建副露对象
             new_meld = Meld(
@@ -522,11 +527,20 @@ class GameState:
                 full_hand = player.hand + ([drawn] if drawn else [])
                 found = [t for t in full_hand if t.value == target_tile.value][:4]
 
+                # 校验: 必须找到 4 张, 否则状态不一致
+                if len(found) != 4:
+                    raise RuntimeError(
+                        f"apply_action(CLOSED_KAN): 手牌中 {target_tile} 不足 4 张 (仅 {len(found)})"
+                    )
                 # 若 drawn_tile 在 found 中，先清掉 drawn_tile 标记
                 if drawn is not None and drawn in found:
                     player.drawn_tile = None
-                    # found 里剩余的 Tile 实例都来自 player.hand，交给下方统一移除
-                self._remove_tiles_from_hand(player, found)
+                # 从 player.hand 移除 (drawn_tile 已单独处理, 不在 hand 中)
+                from_hand = [t for t in found if t is not drawn]
+                if not self._remove_tiles_from_hand(player, from_hand):
+                    raise RuntimeError(
+                        f"apply_action(CLOSED_KAN): 无法从手牌移除 {[str(t) for t in from_hand]}"
+                    )
 
                 # 创建副露 (暗杠 from_player = 自己，4张)
                 new_meld = Meld(

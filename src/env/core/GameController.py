@@ -57,11 +57,11 @@ class GameController:
         for pid in range(self.gamestate.num_players):  # 第四轮，每人拿1张
             self.gamestate.players[pid].hand.append(self.wall.draw_tile())
 
-        # 庄家多拿一张 (第14张)
+        # 庄家多拿一张 (第14张) 作为 drawn_tile, 不放入 hand (避免双重计数)
+        # 标准日麻: 庄家手牌 13 张 + 摸到的第 14 张 (drawn_tile)
         dealer_idx = self.gamestate.dealer_index
         dealer_tile = self.wall.draw_tile()
-        self.gamestate.players[dealer_idx].hand.append(dealer_tile)
-        self.gamestate.players[dealer_idx].drawn_tile = dealer_tile  # 标记为摸到的牌
+        self.gamestate.players[dealer_idx].drawn_tile = dealer_tile  # 第14张作为摸到的牌
 
         # 理牌
         for p in self.gamestate.players:

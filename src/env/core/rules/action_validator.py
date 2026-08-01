@@ -118,7 +118,12 @@ class ActionValidator:
                 candidates.append(Action(type=ActionType.PON, tile=pon_tile_type))
 
             # 3. 检查明杠 (KAN - OPEN / Daiminkan)
-            if self._can_open_kan(player, last_discard):
+            # 四杠散了规则: 场上杠总数已达 4 时, 不允许再明杠
+            total_kans = sum(
+                1 for p in game_state.players
+                for m in p.melds if m.type == ActionType.KAN
+            )
+            if total_kans < 4 and self._can_open_kan(player, last_discard):
                 kan_tile_type = Tile(value=last_discard.value, is_red=False)
                 candidates.append(
                     Action(
@@ -312,6 +317,15 @@ class ActionValidator:
     ) -> List["Action"]:
         """查找玩家在自己回合可以进行的杠 (暗杠, 加杠) (移植)"""
         kan_actions: List["Action"] = []
+
+        # 四杠散了规则: 场上杠总数已达 4 时, 不允许再杠 (第5杠触发途中流局)
+        total_kans = sum(
+            1 for p in game_state.players
+            for m in p.melds if m.type == ActionType.KAN
+        )
+        if total_kans >= 4:
+            return kan_actions
+
         full_hand_tiles = player.hand + (
             [player.drawn_tile] if player.drawn_tile else []
         )

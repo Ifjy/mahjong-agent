@@ -222,9 +222,18 @@ class RulesEngine:
             outcome["score_changes"] = self.scoring.calculate_ryuukyoku_penalty_tenpai(
                 game_state
             )
+            # 附带 tenpai 玩家列表, 供 determine_next_hand_state 判断庄家连庄
+            outcome["tenpai_players"] = [
+                p.player_index for p in game_state.players
+                if self.scoring.hand_analyzer.is_tenpai(p.hand, p.melds)
+            ]
 
         elif end_reason == "SPECIAL_DRAW":
             # 特殊流局 (九种九牌等) 通常不进行听罚分配
+            outcome["score_changes"] = {p.player_index: 0 for p in game_state.players}
+
+        elif end_reason == "ABORTIVE_DRAW":
+            # 途中流局 (四杠散了/岭上牌耗尽等): 连庄, 本场+1, 无听罚
             outcome["score_changes"] = {p.player_index: 0 for p in game_state.players}
 
         return outcome
@@ -319,9 +328,9 @@ class RulesEngine:
 
         elif end_type in {"EXHAUSTIVE_DRAW", "SPECIAL_DRAW"}:
             # 流局
-            # TODO: 委托 Scoring 或 ActionValidator 判断庄家是否听牌
-            # 假设庄家听牌
-            dealer_is_tenpai = True
+            # 用 Scoring 计算的 tenpai_players 判断庄家是否听牌 (决定连庄/轮换)
+            tenpai_players = hand_outcome.get("tenpai_players", [])
+            dealer_is_tenpai = current_dealer_index in tenpai_players
             if dealer_is_tenpai:
                 # 庄家听牌：连庄
                 dealer_changes = False
@@ -329,6 +338,10 @@ class RulesEngine:
                 # 庄家未听牌：庄家轮换
                 dealer_changes = True
                 next_honba = 0  # 庄家轮换清零本场数
+
+        elif end_type == "ABORTIVE_DRAW":
+            # 途中流局 (四杠散了等): 连庄, 本场+1 (默认逻辑已满足)
+            dealer_changes = False
 
         elif end_type == "INVALID_WIN":
             # TODO: 处理罚符 (Chombo) 逻辑，通常不换庄家，本场不清零
