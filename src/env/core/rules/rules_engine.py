@@ -269,6 +269,11 @@ class RulesEngine:
             # 已被移除，它属于 GameController 的职责。
             return GamePhase.WAITING_FOR_RESPONSE
 
+        elif executed_action.type == ActionType.RIICHI:
+            # 立直宣言伴随打牌 (apply_action 已处理 riichi_discard 弃牌)，
+            # 因此立直后同样进入等待响应阶段。
+            return GamePhase.WAITING_FOR_RESPONSE
+
         elif executed_action.type == ActionType.PASS:
             # 错过响应或无人响应
             # GameController 看到 PASS 后，会检查是否所有人都 PASS 了
