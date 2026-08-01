@@ -264,9 +264,9 @@ class GameController:
             self._process_hand_outcome(end_reason="EXHAUSTIVE_DRAW")
             return
 
-        # 摸牌成功
+        # 摸牌成功: 摸到的牌只放入 drawn_tile (不 append 到 hand, 避免双重计数)。
+        # 玩家切出手牌 (Te-dashi) 时, apply_action 的 DISCARD 分支会先把 drawn_tile 并入 hand。
         current_player = self.gamestate.players[self.gamestate.current_player_index]
-        current_player.hand.append(tile)
         current_player.drawn_tile = tile
         self.gamestate.last_draw_was_rinshan = False  # 常规摸牌，清除岭上标记
         self.gamestate.game_phase = GamePhase.PLAYER_DISCARD
@@ -284,16 +284,18 @@ class GameController:
             return
 
         current_player = self.gamestate.players[self.gamestate.current_player_index]
-        current_player.hand.append(tile)
-        current_player.drawn_tile = tile
+        current_player.drawn_tile = tile  # 岭上牌只放 drawn_tile, 不 append 到 hand
         # 标记为岭上摸牌上下文 (供 RulesEngine/Scoring 判定岭上开花使用)
         self.gamestate.last_draw_was_rinshan = True
         self.gamestate.game_phase = GamePhase.PLAYER_DISCARD
 
     def _advance_to_next_turn(self):
-        """流转到下家摸牌"""
+        """流转到下家摸牌 (全 PASS 后)。
+        注意: 下家是"打牌者的下家"(last_discard_player_index+1), 而非
+        current_player_index+1 —— 后者在响应阶段可能被改为响应者, 会跳错家。
+        """
         next_pid = (
-            self.gamestate.current_player_index + 1
+            self.gamestate.last_discard_player_index + 1
         ) % self.gamestate.num_players
         self.gamestate.current_player_index = next_pid
         self.gamestate.game_phase = (
