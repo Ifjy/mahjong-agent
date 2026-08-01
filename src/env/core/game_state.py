@@ -58,7 +58,11 @@ class PlayerState:
     # 这些状态由 RulesEngine 计算后填入，用于加速 valid_actions 生成和 Observation
     is_menzen: bool = True  # 是否门清 (计算符数和役种必需)
     is_tenpai: bool = False  # 是否听牌 (用于流局罚符)
-    is_furiten: bool = False  # [新增] 是否处于振听状态 (用于禁止荣和)
+    is_furiten: bool = False  # 是否处于振听状态 (用于禁止荣和, 综合标记)
+    # 同巡振听: 本巡内曾对可荣和的牌 PASS (过自己摸牌后清除)
+    temporary_furiten: bool = False
+    # 立直振听: 立直后曾对可荣和的牌 PASS (永久, 直到本局结束)
+    riichi_furiten: bool = False
 
     # --- 统计/结算信息 ---
     has_won: bool = False  # 是否和牌
@@ -78,6 +82,8 @@ class PlayerState:
         self.is_menzen = True
         self.is_tenpai = False
         self.is_furiten = False
+        self.temporary_furiten = False
+        self.riichi_furiten = False
         self.has_won = False
 
     @property

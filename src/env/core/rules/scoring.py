@@ -934,12 +934,18 @@ class Scoring:
         self, player: "PlayerState", winning_tile: "Tile", game_state: "GameState"
     ) -> bool:
         """
-        检查振听 (仅荣和时调用)。
-        本实现覆盖舍牌振听 (永久): 听的牌任一在自己弃牌河中。
-        同巡振听/立直振听需 GameState 额外字段 (阶段1后续补)。
+        检查振听 (仅荣和时调用)。三种振听:
+        1. 舍牌振听 (永久): 听的牌任一在自己弃牌河中。
+        2. 同巡振听: 本巡曾对可荣和的牌 PASS (player.temporary_furiten)。
+        3. 立直振听: 立直后曾对可荣和的牌 PASS (player.riichi_furiten, 永久)。
         """
-        # 舍牌振听: 听的牌 (去掉 winning_tile 后的 13 张) 任一在弃牌河
-        # 注意: 荣和时 player.hand 不含 winning_tile, 直接用 player.hand
+        # 同巡振听 / 立直振听 (由 ActionValidator 在 PASS 时设置标记)
+        if getattr(player, "temporary_furiten", False):
+            return True
+        if getattr(player, "riichi_furiten", False):
+            return True
+
+        # 舍牌振听: 听的牌任一在弃牌河
         try:
             waits = self.hand_analyzer.find_wait_tiles(player.hand, player.melds)
         except Exception:
@@ -947,11 +953,8 @@ class Scoring:
         if not waits:
             return False
         discard_values = {t.value for t in player.discards}
-        # 若任一听牌在弃牌河 -> 振听
         if waits & discard_values:
             return True
-        # 立直振听: 立直后曾有机会荣和但 PASS (需 player.riichi_passed_ron 字段,
-        # 当前 PlayerState 未实现, 暂跳过)
         return False
 
     def _calculate_dora(

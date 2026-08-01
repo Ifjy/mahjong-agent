@@ -84,7 +84,7 @@ class ActionValidator:
                 )
 
             # 3b. 生成所有可能的打牌动作 (DISCARD)
-            candidates.extend(self._generate_discard_actions(player))
+            candidates.extend(self._generate_discard_actions(player, game_state))
 
         # 4. 检查特殊流局 (九种九牌)
         if self._can_declare_kyuushu_kyuuhai(player, game_state):
@@ -146,7 +146,7 @@ class ActionValidator:
 
     def resolve_response_priorities(
         self, declarations: Dict[int, "Action"], discarder_index: int, num_players: int
-    ) -> Tuple[Optional["Action"], Optional["int"]]:
+    ) -> Tuple[Optional["Action"], Optional[int]]:
         """
         根据收集到的响应声明，解决优先级冲突。
         (此逻辑移植自 temp_from_game state.py)
@@ -334,13 +334,15 @@ class ActionValidator:
         tile_counts: TypingCounter[Tile] = Counter(full_hand_tiles)
         for tile_object, count in tile_counts.items():
             if count == 4:
-                # TODO: 检查立直后暗杠是否改变听牌
-                # if player.riichi_declared and self._ankan_changes_wait(player, tile_object, game_state):
-                #     continue
+                # 立直后暗杠不得改变听牌 (标准规则)
+                if player.riichi_declared and self._kan_changes_waits(
+                    player, game_state, tile_object.value, KanType.CLOSED
+                ):
+                    continue
                 kan_actions.append(
                     Action(
                         type=ActionType.KAN, kan_type=KanType.CLOSED, tile=tile_object
-                    )  # 简化 tile 参数
+                    )
                 )
 
         # 2. 查找加杠 (Kakan)
@@ -349,7 +351,11 @@ class ActionValidator:
                 pon_tile_value = meld.tiles[0].value
                 for tile in full_hand_tiles:
                     if tile.value == pon_tile_value:
-                        # TODO: 检查立直后加杠是否改变听牌
+                        # 立直后加杠不得改变听牌
+                        if player.riichi_declared and self._kan_changes_waits(
+                            player, game_state, pon_tile_value, KanType.ADDED
+                        ):
+                            break
                         kan_actions.append(
                             Action(
                                 type=ActionType.KAN, kan_type=KanType.ADDED, tile=tile
@@ -357,8 +363,70 @@ class ActionValidator:
                         )
                         break  # 一个碰只能加杠一次
 
-        # TODO: 去重逻辑
         return kan_actions
+
+    def _kan_changes_waits(
+        self,
+        player: "PlayerState",
+        game_state: "GameState",
+        kan_value: int,
+        kan_type: "KanType",
+    ) -> bool:
+        """
+        检查立直后某次杠(暗杠/加杠)是否会改变听牌集合。
+        原理: 杠前后 find_wait_tiles 必须完全一致, 否则视为改变听牌 (禁止)。
+        """
+        drawn = player.drawn_tile
+        melds_before = list(player.melds)
+        # 杠前听牌 (听牌判定基于13张, 即 player.hand)
+        try:
+            waits_before = self.hand_analyzer.find_wait_tiles(list(player.hand), melds_before)
+        except Exception:
+            return True  # 无法判定时保守禁止
+
+        # 模拟杠后的手牌与副露
+        if kan_type == KanType.CLOSED:
+            # 暗杠: 手牌中4张同 value 全部移除 (含 drawn 若参与, drawn 单独不计入 hand)
+            drawn_in = drawn is not None and drawn.value == kan_value
+            sim_hand = [t for t in player.hand if t.value != kan_value]
+            new_kan_meld = Meld(
+                type=ActionType.KAN,
+                tiles=tuple(Tile(kan_value) for _ in range(4)),
+                from_player=player.player_index,
+                called_tile=None,
+            )
+            sim_melds = melds_before + [new_kan_meld]
+        else:
+            # 加杠: hand 移除1张 (或用 drawn), PON->KAN
+            sim_hand = list(player.hand)
+            if drawn is not None and drawn.value == kan_value:
+                pass  # 用 drawn, hand 不变
+            else:
+                for t in sim_hand:
+                    if t.value == kan_value:
+                        sim_hand.remove(t)
+                        break
+            sim_melds = []
+            for m in melds_before:
+                if m.type == ActionType.PON and m.tiles[0].value == kan_value:
+                    sim_melds.append(
+                        Meld(
+                            type=ActionType.KAN,
+                            tiles=m.tiles + (Tile(kan_value),),
+                            from_player=m.from_player,
+                            called_tile=m.called_tile,
+                        )
+                    )
+                else:
+                    sim_melds.append(m)
+
+        # 杠后听牌
+        try:
+            waits_after = self.hand_analyzer.find_wait_tiles(sim_hand, sim_melds)
+        except Exception:
+            return True
+
+        return waits_before != waits_after
 
     def _can_declare_riichi_basics(
         self, player: "PlayerState", game_state: "GameState"
@@ -401,23 +469,77 @@ class ActionValidator:
 
         return riichi_discards
 
-    def _generate_discard_actions(self, player: "PlayerState") -> List["Action"]:
-        """为打牌阶段生成所有可能的打牌动作 (移植)"""
+    def _generate_discard_actions(
+        self, player: "PlayerState", game_state: "GameState"
+    ) -> List["Action"]:
+        """为打牌阶段生成所有可能的打牌动作。
+
+        - 立直成立后: 只允许摸切 (打出刚摸的 drawn_tile)。
+        - 鸣牌后: 禁止食替 (打出会复刻刚组成副露的牌)。
+        """
         discard_actions: List["Action"] = []
+
+        # 立直成立后强制摸切 (立直宣言那一巡的打牌由 RIICHI action 处理)
+        if player.riichi_declared and player.drawn_tile is not None:
+            return [Action(type=ActionType.DISCARD, tile=player.drawn_tile)]
+
         full_hand_tiles = player.hand + (
             [player.drawn_tile] if player.drawn_tile else []
         )
 
-        # TODO: 考虑食替 (kuikae) 规则
+        # 食替 (kuikae): 鸣牌后不得打出会复刻刚组成副露的牌
+        kuikae_values = self._kuikae_forbidden_values(player, game_state)
 
         processed_tiles = set()
         for tile in full_hand_tiles:
+            if tile.value in kuikae_values:
+                continue  # 食替禁止
             tile_key = (tile.value, tile.is_red)
             if tile_key not in processed_tiles:
                 discard_actions.append(Action(type=ActionType.DISCARD, tile=tile))
                 processed_tiles.add(tile_key)
 
         return discard_actions
+
+    def _kuikae_forbidden_values(
+        self, player: "PlayerState", game_state: "GameState"
+    ) -> Set[int]:
+        """计算食替禁止打出的 value 集合。
+        仅当上一步是自己的 CHI/PON (刚鸣牌) 时才有限制。
+        """
+        info = game_state.last_action_info
+        if not info:
+            return set()
+        # 只在自己刚鸣牌后限制
+        if info.get("player") != player.player_index:
+            return set()
+        action_obj = info.get("action_obj")
+        if action_obj is None:
+            return set()
+
+        forbidden: Set[int] = set()
+        if action_obj.type == ActionType.CHI:
+            # 吃后: 禁止打出与该顺子同 value 范围会复刻顺子的牌
+            # 简化标准规则: 吃 X 组成顺子 [a,a+1,a+2], 禁止打出 a/a+1/a+2 中
+            #   手里还有且打出去会让顺子变成"没吃"的牌。
+            # 常见实现: 若手里还有顺子中的端牌, 打出它会复刻 -> 禁止该 value
+            target = action_obj.tile  # 被吃的牌
+            if target is not None:
+                chi_vals = sorted(t.value for t in action_obj.chi_tiles) + [target.value]
+                # 若手牌(含drawn)中还有顺子中间张, 打出它会构成食替
+                hand_vals = [t.value for t in player.hand] + (
+                    [player.drawn_tile.value] if player.drawn_tile else []
+                )
+                for v in set(chi_vals):
+                    if hand_vals.count(v) >= 1:
+                        # 打出同 value 的牌 (手里还剩) 会导致复刻
+                        forbidden.add(v)
+        elif action_obj.type == ActionType.PON:
+            # 碰后: 禁止打出所碰的 value (虽手里已无, 自动满足, 但保留逻辑)
+            target = action_obj.tile
+            if target is not None:
+                forbidden.add(target.value)
+        return forbidden
 
     def _can_declare_kyuushu_kyuuhai(
         self, player: "PlayerState", game_state: "GameState"

@@ -276,19 +276,22 @@ scoring.is_valid_win(player, winning_tile, is_tsumo, game_state) -> bool
 | `_get_final_score_and_payout` return {} | 按 §5.2 重写，加 winner_index | **A5 致命** |
 | 符计算缺雀头/听牌/进位 | 按 §4 重写 | 高 |
 | 役仅 4 种 | 按 §3 补全 | 高（分批） |
-| `_is_furiten` stub | 按 §7 实现 | 高 |
-| context 缺 rinshan/haitei 等 | GameState 标记 + context 补 | 中 |
-| 流局罚符未实现 | 按 §9 | 中 |
+| ✅ `_is_furiten` 三种振听 | 舍牌/同巡/立直 全部实现 | 完成 v2 |
+| ✅ context rinshan/haitei 等 | GameState 标记 + context 补全 | 完成 v1 |
+| ✅ 流局罚符 | 按 §9 实现 | 完成 v1 |
+| ❌ 流局满贯 nagashi mangan | 需追踪弃牌河被鸣标记 | 待实现 |
+| ❌ 罚符 Chombo | INVALID_WIN 分支未计分 | 待实现 |
+| ❌ 役满细节 | 国士十三面/真九莲/大车轮 未区分 | 待实现 |
 
 ---
 
 ## 11. 验收标准
 
-1. ✅ §3 役种表全部实现（可用单元测试逐役验证）。
-2. ✅ §4 符数与天凤/雀魂一致（至少覆盖 1-4 番 20-110 符常见组合）。
+1. ✅ §3 役种表基本实现（普通役22种 + 役满11种）；缺：国士十三面、真九莲、大车轮。
+2. ✅ §4 符数与天凤/雀魂一致（覆盖 1-4 番 20-110 符常见组合）。
 3. ✅ §5.2 支付分配正确，和牌能结算分数。
-4. ✅ §7 三种振听生效。
-5. ✅ 黄金牌谱回放：和牌点数与官方计分器一致。
+4. ✅ §7 三种振听生效（舍牌/同巡/立直）。
+5. ⚠️ 黄金牌谱回放：基础和牌点数一致；流局满贯/罚符场景未覆盖。
 
 ---
 
@@ -297,3 +300,5 @@ scoring.is_valid_win(player, winning_tile, is_tsumo, game_state) -> bool
 | 日期 | 变更 |
 |------|------|
 | 2026-08-01 | v1 初稿，役种全集 + 符/点/振听蓝图 |
+| 2026-08-01 | v1 实现：役种22+役满11、符数、支付、舍牌振听、context补全 |
+| 2026-08-02 | v2 实现同巡振听 + 立直振听（PlayerState 新增 temporary_furiten/riichi_furiten，Controller PASS 时标记） |

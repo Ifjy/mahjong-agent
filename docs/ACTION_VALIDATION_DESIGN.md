@@ -150,8 +150,8 @@ def _ankan_changes_waits(player, tile, game_state):
 - 代价：动作空间更复杂，Agent 可能误放弃自摸。
 **建议**：保持当前简化（强制自摸），RL 阶段再评估。
 
-### 6.2 [实现] 立直后摸切强制
-当前 `player.riichi_declared` 时 DISCARD 应只含 drawn_tile。需在 `_generate_discard_actions` 加分支。当前未实现。
+### 6.2 [已实现 v2] 立直后摸切强制
+`_generate_discard_actions` 在 `player.riichi_declared` 时只返回 drawn_tile 的 DISCARD（立直宣言那一巡由 RIICHI action 处理）。
 
 ### 6.3 [实现] 性能：is_valid_win 缓存
 TSUMO/RON 判定调 is_valid_win，内部跑完整计分。可缓存：同玩家同手牌同巡内 WinForm 分解复用。
@@ -162,12 +162,13 @@ TSUMO/RON 判定调 is_valid_win，内部跑完整计分。可缓存：同玩家
 
 | 现状 | 设计要求 | 优先级 |
 |------|----------|--------|
-| `_find_self_kans` 用 `meld["type"]`(dict) | 改 `meld.type` 属性（A3） | **致命** |
-| `_find_riichi_discards` 调 `is_tenpai`(慢) | 复用 HandAnalyzer 表查 | 高 |
-| 立直后杠限制 TODO | 按 §2.3 实现 | 高 |
-| 食替 TODO | 按 §4 实现 | 中 |
-| 立直后摸切强制未实现 | 按 §6.2 | 中 |
-| `Optional["int"]` 笔误 | 改 `Optional[int]` | 低 |
+| ✅ `_find_self_kans` 用 `meld.type` 属性 | 已修复（A3） | 完成 |
+| ✅ 立直后杠限制 (暗杠/加杠听牌变更检查) | 按 §2.3 实现 `_kan_changes_waits` | 完成 v2 |
+| ✅ 食替 | 按 §4 实现 `_kuikae_forbidden_values` | 完成 v2 |
+| ✅ 立直后摸切强制 | 按 §6.2 | 完成 v2 |
+| ✅ `Optional["int"]` 笔误 | 改 `Optional[int]` | 完成 v2 |
+| ❌ 多家荣和 (config multiple_ron) | resolve_response_priorities 仍头跳 | 待实现 |
+| ❌ 抢杠 chankan | 加杠/暗杠未触发响应 | 待实现 |
 
 ---
 
@@ -178,7 +179,7 @@ TSUMO/RON 判定调 is_valid_win，内部跑完整计分。可缓存：同玩家
 3. ✅ 立直后杠/摸切/响应限制生效。
 4. ✅ 食替禁止打牌生效。
 5. ✅ 振听时 RON 不生成。
-6. ✅ 黄金牌谱回放：每个 declared action 都在候选列表中。
+6. ⚠️ 黄金牌谱回放：基础场景通过；抢杠/多家荣和场景未覆盖。
 
 ---
 
@@ -187,3 +188,4 @@ TSUMO/RON 判定调 is_valid_win，内部跑完整计分。可缓存：同玩家
 | 日期 | 变更 |
 |------|------|
 | 2026-08-01 | v1 初稿，候选动作规则 + 立直限制 + 食替 + 振听入口 |
+| 2026-08-02 | v2 实现立直后杠听牌变更检查、立直摸切强制、食替、Optional[int] 笔误修复 |

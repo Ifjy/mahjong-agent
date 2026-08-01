@@ -161,8 +161,10 @@ class GameController:
         """
         处理 WAITING_FOR_RESPONSE 阶段的动作 (吃 / 碰 / 杠 / 荣 / 过)。
         """
-        # 1. 记录响应
+        # 1. 记录响应; 若 PASS 且本可荣和, 设置振听标记
         self.pending_responses[player_idx] = action
+        if action.type == ActionType.PASS:
+            self._update_furiten_on_pass(player_idx)
 
         # 2. 检查是否所有人都响应了 (除了打牌者自己)
         # 需要响应的人数 = 总人数 - 1
@@ -180,6 +182,26 @@ class GameController:
         else:
             # 所有人 PASS -> 流转到下家摸牌
             self._advance_to_next_turn()
+
+    def _update_furiten_on_pass(self, player_idx: int):
+        """玩家在响应阶段 PASS 时, 若该牌本可被其荣和, 设置振听标记。
+        - 同巡振听 (temporary_furiten): 本巡内, 过自己摸牌后清除。
+        - 立直振听 (riichi_furiten): 立直后 PASS 可荣和的牌, 永久 (本局)。
+        """
+        player = self.gamestate.players[player_idx]
+        last_discard = self.gamestate.last_discarded_tile
+        if last_discard is None:
+            return
+        try:
+            can_ron = self.rules_engine.scoring.is_valid_win(
+                player, last_discard, is_tsumo=False, game_state=self.gamestate
+            )
+        except Exception:
+            can_ron = False
+        if can_ron:
+            player.temporary_furiten = True
+            if player.riichi_declared:
+                player.riichi_furiten = True
 
     def _execute_response(self, player_idx: int, action: Action):
         """执行获胜的响应动作"""
@@ -268,6 +290,8 @@ class GameController:
         # 玩家切出手牌 (Te-dashi) 时, apply_action 的 DISCARD 分支会先把 drawn_tile 并入 hand。
         current_player = self.gamestate.players[self.gamestate.current_player_index]
         current_player.drawn_tile = tile
+        # 自己摸牌后, 同巡振听解除 (立直振听不解除)
+        current_player.temporary_furiten = False
         self.gamestate.last_draw_was_rinshan = False  # 常规摸牌，清除岭上标记
         self.gamestate.game_phase = GamePhase.PLAYER_DISCARD
 
