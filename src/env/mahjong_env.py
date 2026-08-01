@@ -83,7 +83,9 @@ class MahjongEnv(gym.Env):
         state = self.controller.gamestate
         reward = self._calculate_reward(old_score, state, current_player_idx)
 
-        terminated = state._game_over_flag
+        # 终止判定: _game_over_flag 或 game_phase==GAME_OVER 任一为真 (防御不一致)
+        from src.env.core.game_state import GamePhase
+        terminated = state._game_over_flag or (state.game_phase == GamePhase.GAME_OVER)
         truncated = False
 
         # 6. 获取新状态 (会更新 self._acting_player_idx)

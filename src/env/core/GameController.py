@@ -316,6 +316,7 @@ class GameController:
                 # 检查是否整场游戏结束
                 if self.rules_engine.is_game_over(self.gamestate):
                     self.gamestate.game_phase = GamePhase.GAME_OVER
+                    self.gamestate._game_over_flag = True  # 同步置位, Env 据此返回 terminated
                     break  # 退出循环
                 else:
                     self._start_new_hand()
