@@ -42,11 +42,14 @@ class MahjongEnv(gym.Env):
         self._acting_player_idx = 0
 
     def reset(self, seed=None, options=None):
-        """重置环境并返回初始观察"""
-        # --- 改进点 2: reset 流程由 Controller 接管 ---
+        """重置环境并返回初始观察。
+        seed 用于复现: 注入独立 random.Random 到 Wall, 保证洗牌可复现 (GAME_FLOW §10.6)。
+        """
+        import random as _random
         if seed is not None:
-            # 处理 seed (如果 Controller 支持)
-            pass
+            # 注入带 seed 的 rng 到 Wall, 使整局洗牌/发牌可复现
+            self.controller.wall.rng = _random.Random(seed)
+            super().reset(seed=seed)  # gymnasium 规范: 同步内部 np_random
 
         self.controller.reset()  # Controller 执行发牌等流程
 

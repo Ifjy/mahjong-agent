@@ -102,8 +102,10 @@ class Wall:
     NUM_DEAD_WALL = 14  # 王牌区固定14张
     NUM_REPLACEMENT_TILES = 4  # 岭上牌数量
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[Dict] = None, rng: Optional[random.Random] = None):
         self.config = config or {}
+        # 独立的随机数发生器 (支持 seed 复现); None 时退回全局 random
+        self.rng = rng if rng is not None else random
         self.live_tiles: List[Tile] = []  # 可供正常摸牌的牌
         self.dead_wall_tiles: List[Tile] = []  # 王牌区的牌 (包含岭上牌和指示牌)
         self.dora_indicators: List[Tile] = []  # 当前已公开的宝牌指示牌
@@ -140,7 +142,7 @@ class Wall:
     def shuffle_and_setup(self):
         """洗牌并设置牌墙、宝牌指示牌"""
         all_tiles = self._generate_tiles()
-        random.shuffle(all_tiles)
+        self.rng.shuffle(all_tiles)
 
         num_live = len(all_tiles) - self.NUM_DEAD_WALL
         self.live_tiles = all_tiles[:num_live]

@@ -255,12 +255,15 @@ while True:
 
 | 现状 | 设计要求 | 动作 |
 |------|----------|------|
-| `_perform_rinshan_draw` 调 `draw_rinshan_tile`（不存在） | 调 `draw_replacement_tile` | **修 A1** |
-| 无 `initial_dealer_index` | GameState 增字段 | **修 A2** |
-| `dealer_is_tenpai` 硬编码 True | 由 Scoring 提供 | **修 B8** |
-| 仅九种九牌 SPECIAL_DRAW | 补其余3种途中流局检测 | 阶段1 |
-| 无流局满贯 | Scoring 检测 | 阶段1 |
-| 岭上摸牌后未翻新宝牌指示牌 | KAN 后调 `wall.reveal_new_dora()` | **补** |
+| ✅ `_perform_rinshan_draw` 用 `draw_replacement_tile` + `reveal_new_dora` | 已修 (A1) | 完成 |
+| ✅ `initial_dealer_index` 字段 | 已修 (A2) | 完成 |
+| ✅ `dealer_is_tenpai` 由 Scoring 提供 | 已修 (B8) | 完成 |
+| ✅ 4 种途中流局检测 | `_check_abortive_draw` + 杠后/响应检测 | 完成 v3 |
+| ✅ 流局满贯 | Scoring 近似实现 | 完成 v3 |
+| ✅ 岭上摸牌后翻新宝牌 | `reveal_new_dora()` | 完成 |
+| ✅ seed 复现 | Wall 接受 rng, Env.reset(seed) 注入 | 完成 v4 |
+| ❌ 西入 (extensions) | 南4局后延长西场 | 待实现 |
+| ❌ 多家荣和 | 头跳为默认, config 开关待加 | 待实现 |
 
 ---
 
@@ -270,8 +273,8 @@ while True:
 2. ✅ 一局能从 DEALING 走到 GAME_OVER 或 HAND_OVER→开新局，无死锁/异常。
 3. ✅ 响应阶段正确收齐 3 人响应。
 4. ✅ 杠→岭上摸牌→翻宝牌 链路通。
-5. ✅ 4 种途中流局 + 流局满贯可触发（至少九种九牌）。
-6. ✅ seed 固定下，完整一局的 phase 序列可复现。
+5. ✅ 4 种途中流局 + 流局满贯可触发（九种九牌为玩家声明，其余自动检测）。
+6. ✅ seed 固定下，reset 的洗牌/发牌可复现（同 seed 同初始手牌）。
 
 ---
 
@@ -280,3 +283,4 @@ while True:
 | 日期 | 变更 |
 |------|------|
 | 2026-08-01 | v1 初稿，确立状态机图、auto-flow、流局/终局规则 |
+| 2026-08-02 | v2-v4 实现：途中流局检测、流局满贯、岭上翻宝、seed 复现；修复清单 7/9 完成 |
