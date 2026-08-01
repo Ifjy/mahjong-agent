@@ -161,11 +161,21 @@ mjagent/
 7. ✅ **响应阶段多智能体调度**（新增）→ Env 增加 `_next_responder()`，WAITING_FOR_RESPONSE 阶段自动推进到下一个未响应玩家，使单 agent 外层循环能驱动 4 人游戏。
 
 ### 🔴 未修复（阶段1 规则补全，非崩溃项）
-- **`Scoring.get_final_score_and_payout()` 实质未实现**（return {}）→ 和牌无法结算分数（当前游戏靠流局推进，分数不变）。
-- **振听 (`_is_furiten`)、符数细节、多数役种、立直后杠的听牌变更检查** 均为 TODO → 导致几乎不会判定可和，游戏倾向无限流局。
-- **`MahjongEnv.reset()` 忽略 seed**（C3，回归测试需要）。
-- **`tests/test_env.py` 接口过时**（C2，待重写）。
-- **岭上牌摸完后仍可声明杠**（规则不完整，非崩溃，AI 启发式过度杠）→ 阶段1 由 ActionValidator 加限制。
+> **更新 2026-08-02**：经全面审计，下列大部分项已在规则补全阶段(v2-v4)实现。当前真实剩余项：
+
+- **Scoring 支付已实现**（含 winner_index/honba/riichi棒），不再是 return {}。
+- **振听三种已全实现**（舍牌/同巡/立直），符数已重写，立直后杠限制已实现，食替已实现。
+- **真实剩余规则项**（低频，非阻塞）：
+  - 多家荣和（当前头跳为默认，config 开关待加）。
+  - 抢杠 chankan（需加杠/暗杠触发响应的架构改动）。
+  - 西入（南4局后延长西场）。
+- **`MahjongEnv.reset()` 已支持 seed**（注入 Wall.rng，C3 已修）。
+- **岭上牌摸完后禁止第5杠**（四杠散了规则已实现）。
+- **config_loader.py 仍空**（default_config.yaml schema 与代码读取 key 不对齐，切换 ruleset 无效）→ 阶段 RL 准备时补。
+- **黄金牌谱回放未实现**（规则正确性缺金标准验证）。
+- **observation 缺 5 个 RL 字段**（opp_melds/riichi_flags/drawn_tile/actual_dora/my_furiten）。
+- **reward 仍是临时实现**（per-player reward 未实现）。
+- **大量裸 print**（无 logger，训练时 I/O 性能问题）。
 
 ---
 
