@@ -90,9 +90,8 @@ class MahjongEnv(gym.Env):
         # 4. 将动作交给 Controller (Controller 内部维护 current_player_index)
         self.controller.step(current_player_idx, action)
 
-        # 5. 计算奖励
+        # 5. 计算奖励 (step reward 仅含稠密部分; episode reward 在 info["rewards"])
         state = self.controller.gamestate
-        # 单玩家步内 reward (稠密 shaping)
         reward = self._step_reward(state, current_player_idx)
 
         # 终止判定: _game_over_flag 或 game_phase==GAME_OVER 任一为真 (防御不一致)
@@ -107,8 +106,6 @@ class MahjongEnv(gym.Env):
         # 终局时计算 per-player episode reward, 写入 info 供 Trainer 取
         if terminated:
             info["rewards"] = self._episode_rewards(state)
-            # 当前玩家的步内 reward 叠加其 episode reward
-            reward += info["rewards"].get(current_player_idx, 0.0)
             info["final_scores"] = [p.score for p in state.players]
 
         return observation, reward, terminated, truncated, info
@@ -187,30 +184,36 @@ class MahjongEnv(gym.Env):
     def _episode_rewards(self, state: GameState) -> Dict[int, float]:
         """终局时计算 per-player episode reward (顺位/点数/hybrid)。
         详见 REWARD_DESIGN.md / RL_AGENT_EXPERIMENT_DESIGN.md §4。
+        所有模式均保证零和 (sum of rewards == 0)。
         """
         scores = [p.score for p in state.players]
         n = state.num_players
         rewards: Dict[int, float] = {}
 
         if self.reward_mode == "placement":
-            # 纯顺位: 按分数降序排名, 取 placement_rewards
+            # 纯顺位: 按分数降序排名, 取 placement_rewards (零和)
             ranking = sorted(range(n), key=lambda i: -scores[i])
             for rank, pid in enumerate(ranking):
                 r = self.placement_rewards[min(rank, len(self.placement_rewards) - 1)]
                 rewards[pid] = r
 
         elif self.reward_mode == "score_delta":
-            # 点数差 (归一化)
+            # 点数差 (零和归一化: 减均值, 消除立直棒供托造成的非零和)
+            raw = [(scores[i] - self._initial_score) / self.score_normalize for i in range(n)]
+            mean_r = sum(raw) / n
             for i in range(n):
-                rewards[i] = (scores[i] - self._initial_score) / self.score_normalize
+                rewards[i] = raw[i] - mean_r
 
         else:  # hybrid
             ranking = sorted(range(n), key=lambda i: -scores[i])
+            raw_score = [(scores[i] - self._initial_score) / self.score_normalize for i in range(n)]
+            mean_score = sum(raw_score) / n
             for rank, pid in enumerate(ranking):
                 placement_r = self.placement_rewards[
                     min(rank, len(self.placement_rewards) - 1)
                 ]
-                score_r = (scores[pid] - self._initial_score) / self.score_normalize
+                # score 项用零和归一化 (减均值)
+                score_r = raw_score[pid] - mean_score
                 rewards[pid] = placement_r + self.score_alpha * score_r
 
         return rewards

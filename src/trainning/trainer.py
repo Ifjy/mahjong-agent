@@ -113,17 +113,18 @@ class Trainer:
             if terminated or truncated:
                 break
 
-        # 终局: per-player episode reward
+        # 终局: per-player episode reward (来自 info["rewards"], 与稠密步reward分离)
         final_scores = info.get("final_scores", [0, 0, 0, 0])
         per_player_rewards = info.get(
             "rewards", {i: 0.0 for i in range(4)}
         )
-        # 回填各 agent 的 episode reward (供 DQN 等使用)
+        # 回填各 agent 的 episode reward (稠密步reward + episode reward)
         for i, agent in enumerate(self.agents):
             ep_r = dense_rewards[i] + per_player_rewards.get(i, 0.0)
             agent.assign_episode_reward(ep_r)
             agent.update()
 
+        # ep_reward 记录最后一个动作玩家的总 reward (稠密+episode)
         ep_reward = dense_rewards[last_action_player] + per_player_rewards.get(
             last_action_player, 0.0
         )
