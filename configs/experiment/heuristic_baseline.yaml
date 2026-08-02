@@ -1,0 +1,28 @@
+experiment:
+  name: "heuristic_baseline"
+  seed: 42
+  total_episodes: 20
+  log_dir: "runs"
+
+game:
+  num_players: 4
+  initial_score: 25000
+
+ruleset:
+  use_red_fives: true
+  allow_kuitan: false
+  game_length: "hanchan"
+  tobi_rule: "any"
+
+state_encoder_config:
+  max_actions: 100
+  action_feature_dim: 128
+
+render: false
+algo: "heuristic"
+agents: ["heuristic", "heuristic", "heuristic", "heuristic"]
+
+reward:
+  mode: "score_delta"
+  score_normalize: 10000
+  step_penalty: 0.0

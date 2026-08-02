@@ -41,6 +41,17 @@ class MahjongEnv(gym.Env):
         # 当前行动玩家指针 (多智能体调度, 由 _get_info 维护, 不写 GameState)
         self._acting_player_idx = 0
 
+        # —— Reward 配置 (见 REWARD_DESIGN / RL_AGENT_EXPERIMENT_DESIGN §3/§4) ——
+        reward_cfg = self.config.get("reward", {})
+        self.reward_mode = reward_cfg.get("mode", "score_delta")
+        self.placement_rewards = reward_cfg.get(
+            "placement_rewards", [1.0, 0.3, -0.3, -1.0]
+        )
+        self.score_alpha = reward_cfg.get("score_alpha", 0.5)
+        self.score_normalize = reward_cfg.get("score_normalize", 10000)
+        self.step_penalty = reward_cfg.get("step_penalty", 0.0)
+        self._initial_score = self.config.get("initial_score", 25000)
+
     def reset(self, seed=None, options=None):
         """重置环境并返回初始观察。
         seed 用于复现: 注入独立 random.Random 到 Wall, 保证洗牌可复现 (GAME_FLOW §10.6)。
@@ -81,7 +92,8 @@ class MahjongEnv(gym.Env):
 
         # 5. 计算奖励
         state = self.controller.gamestate
-        reward = self._calculate_reward(old_score, state, current_player_idx)
+        # 单玩家步内 reward (稠密 shaping)
+        reward = self._step_reward(state, current_player_idx)
 
         # 终止判定: _game_over_flag 或 game_phase==GAME_OVER 任一为真 (防御不一致)
         from src.env.core.game_state import GamePhase
@@ -91,6 +103,13 @@ class MahjongEnv(gym.Env):
         # 6. 获取新状态 (会更新 self._acting_player_idx)
         observation = self._get_observation()
         info = self._get_info()
+
+        # 终局时计算 per-player episode reward, 写入 info 供 Trainer 取
+        if terminated:
+            info["rewards"] = self._episode_rewards(state)
+            # 当前玩家的步内 reward 叠加其 episode reward
+            reward += info["rewards"].get(current_player_idx, 0.0)
+            info["final_scores"] = [p.score for p in state.players]
 
         return observation, reward, terminated, truncated, info
 
@@ -161,25 +180,40 @@ class MahjongEnv(gym.Env):
             return cand_idx
         return None
 
-    def _calculate_reward(self, old_score: int, state: GameState, player_idx: int) -> float:
+    def _step_reward(self, state: GameState, player_idx: int) -> float:
+        """单步稠密 reward (默认 0 或步惩罚)。详细 shaping 由 config 控制。"""
+        return -abs(self.step_penalty)
+
+    def _episode_rewards(self, state: GameState) -> Dict[int, float]:
+        """终局时计算 per-player episode reward (顺位/点数/hybrid)。
+        详见 REWARD_DESIGN.md / RL_AGENT_EXPERIMENT_DESIGN.md §4。
         """
-        计算奖励值。
-        如果当前是局结束阶段 (HAND_OVER_SCORES)，则返回指定玩家的点数变化。
-        否则返回小的负数作为步惩罚。
-        """
+        scores = [p.score for p in state.players]
+        n = state.num_players
+        rewards: Dict[int, float] = {}
 
-        if state._hand_over_flag:
-            # 局刚刚结束，计算该动作玩家的点数变化作为奖励
-            new_score = state.players[player_idx].score
+        if self.reward_mode == "placement":
+            # 纯顺位: 按分数降序排名, 取 placement_rewards
+            ranking = sorted(range(n), key=lambda i: -scores[i])
+            for rank, pid in enumerate(ranking):
+                r = self.placement_rewards[min(rank, len(self.placement_rewards) - 1)]
+                rewards[pid] = r
 
-            # (注意：这个实现可能过于简化，实际应考虑一局内其他玩家的奖励)
-            return (new_score - old_score) / 1000.0  # 假设用千点作为奖励单位
+        elif self.reward_mode == "score_delta":
+            # 点数差 (归一化)
+            for i in range(n):
+                rewards[i] = (scores[i] - self._initial_score) / self.score_normalize
 
-            # (注意：这个实现可能过于简化，实际应考虑一局内其他玩家的奖励)
-            return (new_score - old_score) / 1000.0  # 假设用千点作为奖励单位
+        else:  # hybrid
+            ranking = sorted(range(n), key=lambda i: -scores[i])
+            for rank, pid in enumerate(ranking):
+                placement_r = self.placement_rewards[
+                    min(rank, len(self.placement_rewards) - 1)
+                ]
+                score_r = (scores[pid] - self._initial_score) / self.score_normalize
+                rewards[pid] = placement_r + self.score_alpha * score_r
 
-        # 局中奖励 (可扩展，例如立直 +100，每步 -0.01)
-        return -0.01
+        return rewards
 
     def render(self, mode="human"):
         """渲染当前游戏状态"""

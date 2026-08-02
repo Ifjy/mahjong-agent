@@ -1,0 +1,41 @@
+# 阶段 A 闭环验证实验: 4 随机 agent
+# 用途: 验证环境闭环 (无异常/分数守恒/metrics.csv 生成)
+
+experiment:
+  name: "random_baseline"
+  seed: 42
+  total_episodes: 100
+  checkpoint_freq: 0        # 0=不存 checkpoint (基线 agent 无权重)
+  log_dir: "runs"
+
+game:
+  num_players: 4
+  initial_score: 25000
+
+ruleset:
+  use_red_fives: true
+  allow_kuitan: false
+  game_length: "hanchan"
+  tobi_rule: "any"
+
+state_encoder_config:
+  max_actions: 100
+  action_feature_dim: 128
+
+render: false
+
+algo: "random"
+algo_config: {}
+
+agents:          # 4 个 agent 的算法 (self-play)
+  - "random"
+  - "random"
+  - "random"
+  - "random"
+
+reward:
+  mode: "hybrid"
+  placement_rewards: [1.0, 0.3, -0.3, -1.0]
+  score_alpha: 0.5
+  score_normalize: 10000
+  step_penalty: 0.0
