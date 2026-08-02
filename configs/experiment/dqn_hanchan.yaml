@@ -1,0 +1,49 @@
+# DQN 训练实验配置 (半庄, 4 个 DQN self-play)
+# 用法: python scripts/train.py --config configs/experiment/dqn_hanchan.yaml
+
+experiment:
+  name: "dqn_hanchan"
+  seed: 42
+  total_episodes: 200
+  checkpoint_freq: 50
+  log_dir: "runs"
+
+game:
+  num_players: 4
+  initial_score: 25000
+
+ruleset:
+  use_red_fives: true
+  allow_kuitan: false
+  game_length: "hanchan"
+  tobi_rule: "any"
+
+state_encoder_config:
+  max_actions: 100
+  action_feature_dim: 128
+
+render: false
+
+algo: "dqn"
+algo_config:
+  device: "auto"            # auto/cpu/cuda
+  hidden_dim: 256
+  learning_rate: 0.0001
+  gamma: 0.99
+  buffer_size: 100000
+  batch_size: 128
+  target_update_freq: 500
+  epsilon_start: 1.0
+  epsilon_end: 0.1
+  epsilon_decay_steps: 200
+
+agents:          # 4 个 DQN self-play
+  - "dqn"
+  - "dqn"
+  - "dqn"
+  - "dqn"
+
+reward:
+  mode: "score_delta"
+  score_normalize: 10000
+  step_penalty: 0.0

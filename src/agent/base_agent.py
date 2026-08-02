@@ -38,16 +38,8 @@ class BaseAgent(ABC):
             action_idx: 选择的动作在 valid_actions 中的索引。
         """
 
-    def store_transition(
-        self,
-        observation,
-        action_idx,
-        reward,
-        next_observation,
-        done,
-        info,
-    ):
-        """存储一条转移 (在线 RL 的 experience buffer)。基线 agent 默认空。"""
+    def store_transition(self, observation, action_idx, reward, next_observation, done, info):
+        """存储一条转移 (s, a, r, s', done)。基线 agent 默认空。"""
         pass
 
     def update(self) -> Dict[str, float]:

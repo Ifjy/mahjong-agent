@@ -6,6 +6,10 @@ from typing import List, Optional, Dict, Any, Tuple, Set, TYPE_CHECKING  # 引�
 from collections import Counter
 from .actions import Action, ActionType, Tile, KanType
 
+# 把模块内 print 重绑到 logger.debug (默认 WARNING 级别静默, --verbose 才输出)
+from src.utils.logger import get_logger as _get_logger
+print = _get_logger(__name__).debug
+
 
 @dataclass(frozen=True)
 class Meld:

@@ -42,6 +42,14 @@ def parse_args():
         "--verbose", action="store_true",
         help="详细日志 (DEBUG 级别, 调试规则时用)",
     )
+    parser.add_argument(
+        "--parallel", action="store_true",
+        help="批量并行训练 (DQN, 多env采集+批量推理)",
+    )
+    parser.add_argument(
+        "--num_envs", type=int, default=8,
+        help="并行训练的 env 数量 (仅 --parallel)",
+    )
     return parser.parse_args()
 
 
@@ -85,7 +93,14 @@ def main():
 
     # 训练
     trainer = Trainer(config)
-    trainer.train(total_episodes=total_episodes, resume_from=args.resume)
+    if args.parallel:
+        log.info("批量并行训练: num_envs=%d", args.num_envs)
+        trainer.train_parallel(
+            total_episodes=total_episodes, num_envs=args.num_envs,
+            resume_from=args.resume,
+        )
+    else:
+        trainer.train(total_episodes=total_episodes, resume_from=args.resume)
 
     log.info("输出目录: %s", trainer.log_dir)
 

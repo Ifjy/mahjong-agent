@@ -41,4 +41,5 @@ def _ensure_registered():
         return
     from src.agent import random_agent  # noqa: F401
     from src.agent import heuristic_agent  # noqa: F401
-    # DQN/PPO 在阶段 B/C 实现后在此导入
+    from src.agent import dqn_agent  # noqa: F401
+    # PPO 在阶段 C 实现后在此导入

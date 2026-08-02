@@ -10,6 +10,10 @@ from src.env.core.game_state import PlayerState  # 假设 PlayerState 在 core �
 from src.env.core.actions import Action, ActionType, KanType
 from src.env.core.game_state import GamePhase
 
+# 模块内 print 重绑到 logger.debug (默认静默)
+from src.utils.logger import get_logger as _get_logger
+print = _get_logger(__name__).debug
+
 
 class GameController:
     """

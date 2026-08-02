@@ -22,6 +22,10 @@ from src.env.core.rules.scoring import Scoring
 from src.env.core.rules.hand_analyzer import HandAnalyzer
 from src.env.core.rules.constants import TERMINAL_HONOR_VALUES, ACTION_PRIORITY, GAME_LENGTH_MAX_WIND, Wind
 
+# 模块内 print 重绑到 logger.debug (默认静默)
+from src.utils.logger import get_logger as _get_logger
+print = _get_logger(__name__).debug
+
 # 假设常量定义在 constants.py
 # from .constants import ROUND_WIND_SOUTH, GAME_LENGTH_MAX_WIND
 
