@@ -36,6 +36,9 @@ class ParallelCollector:
         self.accrue = [[0.0] * 4 for _ in range(num_envs)]
         self.episodes_completed = 0
         self.total_steps = 0
+        # 最近完成局的统计 (供 Trainer 写 metrics)
+        self.last_final_scores: List[int] = [0, 0, 0, 0]
+        self.last_rewards: Dict[int, float] = {}
 
         # 初始化所有 env
         for i, env in enumerate(self.envs):
@@ -134,6 +137,8 @@ class ParallelCollector:
                     self.pending[env_idx][p] = None
                     self.accrue[env_idx][p] = 0.0
             self.episodes_completed += 1
+            self.last_final_scores = next_info.get("final_scores", [0, 0, 0, 0])
+            self.last_rewards = per_player_rewards
             self._reset_env(env_idx)
 
     def _reset_env(self, env_idx: int, seed: Optional[int] = None):

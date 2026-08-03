@@ -56,11 +56,9 @@ def parse_args():
 def main():
     args = parse_args()
 
-    # 日志级别: 默认 quiet (屏蔽 env 内部 print), --verbose 开 DEBUG
+    # 日志级别: 默认 INFO (训练进度可见, env 内部 print 屏蔽); --verbose 开 DEBUG
     if args.verbose:
         verbose()
-    else:
-        quiet()
 
     # 加载配置
     if args.config:
@@ -94,7 +92,7 @@ def main():
     # 训练
     trainer = Trainer(config)
     if args.parallel:
-        log.info("批量并行训练: num_envs=%d", args.num_envs)
+        print(f"启动批量并行训练: num_envs={args.num_envs}, episodes={total_episodes}", flush=True)
         trainer.train_parallel(
             total_episodes=total_episodes, num_envs=args.num_envs,
             resume_from=args.resume,

@@ -25,29 +25,29 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
 
 
 def _configure_default():
-    """默认配置: WARNING 级别 (屏蔽 env 内的 DEBUG/INFO print 等价物)。"""
+    """默认配置: INFO 级别。
+    - 训练进度 (Trainer log.info) 可见。
+    - env 内部 print 已重绑到 debug, 默认不可见。
+    """
     logger = logging.getLogger(_LOGGER_NAME)
-    logger.setLevel(logging.WARNING)
+    logger.setLevel(logging.INFO)
     if not logger.handlers:
-        handler = logging.StreamHandler(sys.stderr)
-        handler.setFormatter(
-            logging.Formatter("[%(levelname)s] %(name)s: %(message)s")
-        )
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(handler)
 
 
 def set_level(level: str):
-    """动态设置日志级别: 'DEBUG'/'INFO'/'WARNING'/'ERROR'/'CRITICAL'。
-    训练时设 WARNING/ERROR 可屏蔽环境内部噪音。"""
-    lvl = getattr(logging, level.upper(), logging.WARNING)
+    """动态设置日志级别: 'DEBUG'/'INFO'/'WARNING'/'ERROR'/'CRITICAL'。"""
+    lvl = getattr(logging, level.upper(), logging.INFO)
     logging.getLogger(_LOGGER_NAME).setLevel(lvl)
 
 
 def quiet():
-    """静默: 只保留 ERROR 以上 (训练时用)。"""
+    """静默: ERROR 以上 (彻底屏蔽所有非错误)。"""
     set_level("ERROR")
 
 
 def verbose():
-    """详细: DEBUG 级别 (调试环境规则时用)。"""
+    """详细: DEBUG 级别 (含 env 内部 print, 调试规则时用)。"""
     set_level("DEBUG")

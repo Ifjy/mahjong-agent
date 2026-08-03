@@ -121,9 +121,27 @@ class Trainer:
                                       base_seed=base_seed)
         checkpoint_freq = self.config.get("experiment", {}).get("checkpoint_freq", 0)
 
-        log.info("批量训练: num_envs=%d, target_episodes=%d", num_envs, total_episodes)
+        def emit(msg):
+            """同时 print(flush) + log.info, 确保进度实时可见。"""
+            print(msg, flush=True)
+            log.info(msg)
+
+        emit("=" * 60)
+        emit("DQN 批量并行训练开始")
+        emit(f"  目标局数: {total_episodes} | 并行 env: {num_envs} | 算法: {self.config.get('algo')}")
+        emit(f"  输出目录: {self.log_dir}")
+        emit("=" * 60)
+
         t0 = time.time()
         last_loss = 0.0
+        last_log_t = t0
+        last_logged_ep = 0
+        # metrics.csv 表头
+        with open(self.metrics_path, "w", newline="", encoding="utf-8") as f:
+            csv.writer(f).writerow(
+                ["episode", "global_step", "loss", "epsilon", "buffer_size",
+                 "score_0", "score_1", "score_2", "score_3", "elapsed_s"]
+            )
         while collector.episodes_completed < total_episodes:
             # 采集
             collector.collect(collect_steps_per_update)
@@ -139,20 +157,50 @@ class Trainer:
                 last_loss = total_loss / n_updates
 
             self.global_step = collector.total_steps
+            # 写 metrics (新完成的局)
+            new_ep = collector.episodes_completed
+            if new_ep > last_logged_ep:
+                with open(self.metrics_path, "a", newline="", encoding="utf-8") as f:
+                    w = csv.writer(f)
+                    for _ in range(last_logged_ep, new_ep):
+                        w.writerow(
+                            [new_ep, self.global_step, f"{last_loss:.4f}",
+                             f"{dqn_agent._current_epsilon():.4f}",
+                             len(dqn_agent.buffer)]
+                            + collector.last_final_scores
+                            + [f"{time.time() - t0:.1f}"]
+                        )
+                last_logged_ep = new_ep
             eps = collector.episodes_completed
-            if eps % 5 < num_envs:  # 每若干局日志一次
-                log.info(
-                    "episodes=%d steps=%d loss=%.4f eps=%.3f buffer=%d sps=%d",
-                    eps, collector.total_steps, last_loss,
-                    dqn_agent._current_epsilon(), len(dqn_agent.buffer),
-                    int(collector.total_steps / max(1, time.time() - t0)),
+            now = time.time()
+            # 实时进度 (每 2 秒至少一次, 避免刷屏)
+            if now - last_log_t >= 2.0 or eps >= total_episodes:
+                elapsed = now - t0
+                sps = collector.total_steps / max(1, elapsed)
+                pct = eps / total_episodes * 100
+                eta_s = (total_episodes - eps) / max(1, eps / elapsed) if eps > 0 else -1
+                eta_str = f"{int(eta_s//60)}m{int(eta_s%60)}s" if eta_s > 0 else "?"
+                emit(
+                    f"[{pct:5.1f}%] ep {eps}/{total_episodes} | "
+                    f"steps {collector.total_steps} | loss {last_loss:.3f} | "
+                    f"eps {dqn_agent._current_epsilon():.3f} | "
+                    f"buf {len(dqn_agent.buffer)} | {sps:.0f} sps | eta {eta_str}"
                 )
+                last_log_t = now
 
             if checkpoint_freq and eps and eps % checkpoint_freq == 0:
                 self._save_checkpoint_parallel(eps, dqn_agent)
 
-        log.info("批量训练完成: %d 局, %d 步, %.1fs",
-                 collector.episodes_completed, collector.total_steps, time.time() - t0)
+        elapsed = time.time() - t0
+        emit("=" * 60)
+        emit("训练完成!")
+        emit(f"  局数: {collector.episodes_completed} | 总步数: {collector.total_steps} | "
+             f"耗时: {elapsed:.1f}s ({collector.episodes_completed / max(1, elapsed):.1f} 局/s)")
+        emit(f"  最终 loss: {last_loss:.4f} | epsilon: {dqn_agent._current_epsilon():.3f} | "
+             f"buffer: {len(dqn_agent.buffer)}")
+        emit(f"  checkpoint: {self.log_dir}/ckpt/")
+        emit(f"  指标日志: {self.metrics_path}")
+        log.info("=" * 60)
 
     def _rollout_one(self, ep: int, base_seed: Optional[int]):
         """单局 rollout: 4 agent 轮转决策 + 经验采集 (s,a,r,s')。
