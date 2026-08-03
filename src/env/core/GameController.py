@@ -45,9 +45,8 @@ class GameController:
 
     def _start_new_hand(self):
         """开始新的一局：洗牌、发牌、设置初始状态"""
-        # 1. 重置数据
+        # 1. 重置数据 (reset_new_hand 内部已调用 shuffle_and_setup, 勿重复)
         self.gamestate.reset_new_hand()
-        self.wall.shuffle_and_setup()
         self.pending_responses.clear()
 
         # 2. 配牌 (Deal Tiles)
@@ -354,6 +353,7 @@ class GameController:
         # 自己摸牌后, 同巡振听解除 (立直振听不解除)
         current_player.temporary_furiten = False
         self.gamestate.last_draw_was_rinshan = False  # 常规摸牌，清除岭上标记
+        self.gamestate.turn_number += 1  # 每巡+1 (F1: 之前从未自增, 第一巡判定全失效)
         self.gamestate.game_phase = GamePhase.PLAYER_DISCARD
 
     def _perform_rinshan_draw(self):

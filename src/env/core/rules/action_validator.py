@@ -69,14 +69,13 @@ class ActionValidator:
         possible_kans = self._find_self_kans(player, game_state)
         candidates.extend(possible_kans)
 
-        # 3. 检查互斥逻辑 (和牌/杠/立直)
-        can_tsumo = any(c.type == ActionType.TSUMO for c in candidates)
+        # 3. 检查互斥逻辑 (杠与打牌互斥; 自摸不强制, 允许放弃自摸打牌)
         can_kan = any(c.type == ActionType.KAN for c in candidates)
 
-        if not can_tsumo and not can_kan:
-            # 只有在不自摸也不杠的情况下才考虑立直和打牌
+        if not can_kan:
+            # 不杠时, 立直和打牌总可选 (即使能自摸也允许放弃, H6修正)
 
-            # 3a. 检查立直 (RIICHI)
+            # 3a. 检查立直 (RIICHI) - 立直宣言未成立时
             possible_riichi_discards = self._find_riichi_discards(player, game_state)
             for discard_tile in possible_riichi_discards:
                 candidates.append(
@@ -458,10 +457,14 @@ class ActionValidator:
                 continue
             processed_tile_keys.add(tile_key)
 
-            # 模拟打出这张牌后的手牌
-            temp_hand_after_discard = [
-                t for t in possible_discards if t != tile_to_discard
-            ]
+            # 模拟打出这张牌后的手牌 (H5: 只移除一张实例, 不是所有相等元素)
+            temp_hand_after_discard = list(possible_discards)
+            _removed_one = False
+            for i, t in enumerate(temp_hand_after_discard):
+                if t == tile_to_discard and not _removed_one:
+                    temp_hand_after_discard.pop(i)
+                    _removed_one = True
+                    break
 
             # **[重构关键]**：调用 self.hand_analyzer 检查听牌
             if self.hand_analyzer.is_tenpai(temp_hand_after_discard, player.melds):

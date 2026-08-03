@@ -346,28 +346,28 @@ class HandAnalyzer:
                         pairs_for_meld = min(p_total, partial_for_meld)
                         pairs_left = p_total - pairs_for_meld
 
-                        blocks = melds_filled + partial_for_meld
-                        # 雀头: 只有 4 面子位都填满后, 剩余对子才作雀头
+                        # 正确公式: 完整面子权重2, 部分块权重1 (修正致命bug: 之前把
+                        # 部分块也乘2, 导致向听虚低, 手牌从不和牌)
+                        # shanten = 8 - 2*(完整面子) - (部分块) - 雀头
                         has_pair = 1 if (meld_slots_left == 0 and pairs_left >= 1) else 0
 
-                        shanten = 8 - 2 * blocks - has_pair
+                        shanten = 8 - 2 * melds_filled - partial_for_meld - has_pair
                         if shanten < best:
                             best = shanten
         return best
 
     def _chiitoitsu_shanten(self, hand_tiles: List[Tile]) -> int:
-        """七对子向听（需门清，手牌 13 张听牌态 / 14 张和牌态）。"""
+        """七对子向听（需门清，手牌 13 张听牌态 / 14 张和牌态）。
+        标准公式: shanten = 6 - pairs + max(0, 7 - kinds) (种类不足需补种类)。
+        """
         counts = _count_tiles_by_value(hand_tiles)
         pairs = sum(1 for c in counts.values() if c >= 2)
-        # 七对子需 7 对；多余张数不计
         kinds = len(counts)
-        # 向听 = 6 - pairs（手牌 13 张时）；若手牌 14 张且 7 对则为 -1
         if len(hand_tiles) == 14:
             if pairs == 7 and kinds == 7:
                 return -1
-            return 6 - pairs + 1  # 还需调整
-        # 13 张：shanten = 6 - pairs
-        return 6 - pairs
+        # 13/14张通用: 6 - pairs + 种类不足惩罚
+        return 6 - pairs + max(0, 7 - kinds)
 
     def _kokushi_shanten(self, hand_tiles: List[Tile]) -> int:
         """国士无双向听（需门清）。"""

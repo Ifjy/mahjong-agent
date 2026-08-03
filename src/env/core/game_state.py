@@ -398,11 +398,9 @@ class GameState:
         if action.type == ActionType.DISCARD:
             tile_to_discard = action.tile
 
-            # 优先切出刚摸到的牌 (Tsumogiri)
-            if player.drawn_tile and player.drawn_tile == tile_to_discard:
+            # 优先切出刚摸到的牌 (Tsumogiri): 按 value 判断 (不依赖 is_red 实例一致性)
+            if player.drawn_tile and player.drawn_tile.value == tile_to_discard.value:
                 player.drawn_tile = None
-                # 记录切出的是摸到的牌 (用于UI显示灰色)
-                # self.last_discard_was_tsumogiri = True
             else:
                 # 切出手牌中的牌 (Te-dashi)
                 # 如果有摸到的牌，先把它并入手牌 (理牌)
@@ -411,8 +409,12 @@ class GameState:
                     player.drawn_tile = None
                     player.hand.sort()
 
-                self._remove_tiles_from_hand(player, [tile_to_discard])
-                # self.last_discard_was_tsumogiri = False
+                # 移除并校验 (H4: 之前不检查返回值, 失败时手牌膨胀)
+                if not self._remove_tiles_from_hand(player, [tile_to_discard]):
+                    raise RuntimeError(
+                        f"apply_action(DISCARD): 无法从手牌移除 {tile_to_discard}, "
+                        f"手牌张数={len(player.hand)}"
+                    )
 
             # 添加到弃牌河
             player.discards.append(tile_to_discard)
@@ -446,15 +448,19 @@ class GameState:
             # 立直必定伴随打牌 (Action.riichi_discard)
             tile_to_discard = action.riichi_discard
 
-            # 执行打牌逻辑 (复制自 DISCARD，或递归调用)
-            if player.drawn_tile and player.drawn_tile == tile_to_discard:
+            # 执行打牌逻辑 (H3: 用 value 判断 tsumogiri + 检查移除返回值)
+            if player.drawn_tile and player.drawn_tile.value == tile_to_discard.value:
                 player.drawn_tile = None
             else:
                 if player.drawn_tile:
                     player.hand.append(player.drawn_tile)
                     player.drawn_tile = None
                     player.hand.sort()
-                self._remove_tiles_from_hand(player, [tile_to_discard])
+                if not self._remove_tiles_from_hand(player, [tile_to_discard]):
+                    raise RuntimeError(
+                        f"apply_action(RIICHI): 无法从手牌移除 {tile_to_discard}, "
+                        f"手牌张数={len(player.hand)}"
+                    )
 
             player.discards.append(tile_to_discard)
             self.last_discarded_tile = tile_to_discard
@@ -581,8 +587,14 @@ class GameState:
                     added_tile = next(
                         (t for t in player.hand if t.value == target_tile.value), None
                     )
-                    if added_tile:
-                        self._remove_tiles_from_hand(player, [added_tile])
+                    if added_tile is None:
+                        raise RuntimeError(
+                            f"apply_action(ADDED_KAN): 手牌中无 {target_tile} 可加杠"
+                        )
+                    if not self._remove_tiles_from_hand(player, [added_tile]):
+                        raise RuntimeError(
+                            f"apply_action(ADDED_KAN): 无法从手牌移除 {added_tile}"
+                        )
 
                 # 更新副露
                 for i, m in enumerate(player.melds):

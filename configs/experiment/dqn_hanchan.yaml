@@ -26,7 +26,7 @@ render: false
 
 algo: "dqn"
 algo_config:
-  device: "auto"            # auto/cpu/cuda
+  device: "cuda" # auto/cpu/cuda
   hidden_dim: 256
   learning_rate: 0.0001
   gamma: 0.99
@@ -37,7 +37,7 @@ algo_config:
   epsilon_end: 0.1
   epsilon_decay_steps: 200
 
-agents:          # 4 个 DQN self-play
+agents: # 4 个 DQN self-play
   - "dqn"
   - "dqn"
   - "dqn"
