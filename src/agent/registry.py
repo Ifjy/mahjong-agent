@@ -36,9 +36,7 @@ def build_agent(algo_name: str, config: Dict, agent_id: int) -> BaseAgent:
 
 def _ensure_registered():
     """导入各 agent 模块以触发 @register_agent 装饰器。"""
-    # 避免重复导入开销
-    if AGENT_REGISTRY:
-        return
+    # 始终导入全部内置 agent, 确保注册完整 (即使部分已注册)
     from src.agent import random_agent  # noqa: F401
     from src.agent import heuristic_agent  # noqa: F401
     from src.agent import dqn_agent  # noqa: F401
