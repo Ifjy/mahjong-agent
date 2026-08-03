@@ -40,16 +40,15 @@ def evaluate(ckpt_path: str, opponent: str, games: int, seat: int = 0):
     dqn.load_state(ckpt["agent"])
     dqn.train_mode = False
 
-    # 3 个对手
-    opps = [build_agent(opponent, {"seed": 100}, i) for i in range(4) if i != seat]
+    # 3 个对手 (用真正的 agent, 不是固定优先级)
+    opps = [build_agent(opponent, {"seed": 100 + i}, i) for i in range(1, 4)]
     # agents[seat] = dqn, 其它 = opponent
-    agents = []
+    agents = [None] * 4
+    agents[seat] = dqn
     oi = 0
     for i in range(4):
-        if i == seat:
-            agents.append(dqn)
-        else:
-            agents.append(opps[oi]); oi += 1
+        if i != seat:
+            agents[i] = opps[oi]; oi += 1
 
     ranks = []        # DQN 的顺位 (1=头名)
     dqn_scores = []
@@ -64,8 +63,8 @@ def evaluate(ckpt_path: str, opponent: str, games: int, seat: int = 0):
             if cp == seat:
                 idx = ag.select_action(obs, info["action_mask"], valid, deterministic=True)
             else:
-                # 基线按优先级
-                idx = min(range(len(valid)), key=lambda i: _P.get(valid[i].type, 8))
+                # 对手用自己的策略
+                idx = ag.select_action(obs, info["action_mask"], valid, deterministic=True)
             obs, r, term, trunc, info = env.step(idx)
             if term or trunc:
                 break
