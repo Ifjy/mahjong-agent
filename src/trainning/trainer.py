@@ -106,8 +106,13 @@ class Trainer:
         if not isinstance(dqn_agent, DQNAgent):
             raise ValueError("train_parallel 仅支持 DQN agent")
 
+        start_episode = 0
+        resume_step = 0
         if resume_from is not None:
-            self._resume(resume_from)
+            start_episode = self._resume(resume_from)
+            resume_step = self.global_step
+            print(f"从 checkpoint 恢复: 已完成 {start_episode} 局, global_step={self.global_step}", flush=True)
+            print(f"将继续训练到 {total_episodes} 局 (还需 {total_episodes - start_episode} 局)", flush=True)
 
         env_config = {
             k: v for k, v in self.config.items()
@@ -118,7 +123,9 @@ class Trainer:
         }
         base_seed = self.config.get("experiment", {}).get("seed", 42)
         collector = ParallelCollector(env_config, dqn_agent, num_envs=num_envs,
-                                      base_seed=base_seed)
+                                      base_seed=base_seed + start_episode,
+                                      initial_episodes=start_episode,
+                                      initial_steps=self.global_step)
         checkpoint_freq = self.config.get("experiment", {}).get("checkpoint_freq", 0)
 
         def emit(msg):
@@ -135,13 +142,15 @@ class Trainer:
         t0 = time.time()
         last_loss = 0.0
         last_log_t = t0
-        last_logged_ep = 0
-        # metrics.csv 表头
-        with open(self.metrics_path, "w", newline="", encoding="utf-8") as f:
-            csv.writer(f).writerow(
-                ["episode", "global_step", "loss", "epsilon", "buffer_size",
-                 "score_0", "score_1", "score_2", "score_3", "elapsed_s"]
-            )
+        last_logged_ep = start_episode
+        # metrics.csv: 恢复时追加, 新训练时写表头
+        metrics_mode = "a" if start_episode > 0 else "w"
+        with open(self.metrics_path, metrics_mode, newline="", encoding="utf-8") as f:
+            if metrics_mode == "w":
+                csv.writer(f).writerow(
+                    ["episode", "global_step", "loss", "epsilon", "buffer_size",
+                     "score_0", "score_1", "score_2", "score_3", "elapsed_s"]
+                )
         while collector.episodes_completed < total_episodes:
             # 采集
             collector.collect(collect_steps_per_update)
@@ -157,28 +166,28 @@ class Trainer:
                 last_loss = total_loss / n_updates
 
             self.global_step = collector.total_steps
-            # 写 metrics (新完成的局)
+            # 写 metrics (有新完成的局时写一行当前状态)
             new_ep = collector.episodes_completed
             if new_ep > last_logged_ep:
                 with open(self.metrics_path, "a", newline="", encoding="utf-8") as f:
-                    w = csv.writer(f)
-                    for _ in range(last_logged_ep, new_ep):
-                        w.writerow(
-                            [new_ep, self.global_step, f"{last_loss:.4f}",
-                             f"{dqn_agent._current_epsilon():.4f}",
-                             len(dqn_agent.buffer)]
-                            + collector.last_final_scores
-                            + [f"{time.time() - t0:.1f}"]
-                        )
+                    csv.writer(f).writerow(
+                        [new_ep, self.global_step, f"{last_loss:.4f}",
+                         f"{dqn_agent._current_epsilon():.4f}",
+                         len(dqn_agent.buffer)]
+                        + collector.last_final_scores
+                        + [f"{time.time() - t0:.1f}"]
+                    )
                 last_logged_ep = new_ep
             eps = collector.episodes_completed
             now = time.time()
             # 实时进度 (每 2 秒至少一次, 避免刷屏)
             if now - last_log_t >= 2.0 or eps >= total_episodes:
                 elapsed = now - t0
-                sps = collector.total_steps / max(1, elapsed)
+                new_steps = collector.total_steps - resume_step
+                new_eps = eps - start_episode
+                sps = new_steps / max(1, elapsed) if new_steps > 0 else 0
                 pct = eps / total_episodes * 100
-                eta_s = (total_episodes - eps) / max(1, eps / elapsed) if eps > 0 else -1
+                eta_s = (total_episodes - eps) / max(1, new_eps / elapsed) if new_eps > 0 else -1
                 eta_str = f"{int(eta_s//60)}m{int(eta_s%60)}s" if eta_s > 0 else "?"
                 emit(
                     f"[{pct:5.1f}%] ep {eps}/{total_episodes} | "
@@ -322,12 +331,25 @@ class Trainer:
         log.info("checkpoint 已保存: %s", ckpt_path)
 
     def _resume(self, ckpt_path: str) -> int:
-        """从 checkpoint 恢复 (阶段 A 最小版)。"""
-        import json
-        with open(ckpt_path, encoding="utf-8") as f:
-            state = json.load(f)
-        self.global_step = state.get("global_step", 0)
-        for i, agent in enumerate(self.agents):
-            if i < len(state.get("agents", [])):
-                agent.load_state(state["agents"][i])
-        return state.get("episode", 0)
+        """从 checkpoint 恢复。支持 .pt (DQN torch格式) 和 .json (基线)。"""
+        if ckpt_path.endswith(".pt"):
+            import torch
+            state = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            self.global_step = state.get("global_step", 0)
+            # DQN checkpoint: agent 字段含网络权重
+            if "agent" in state:
+                self.agents[0].load_state(state["agent"])
+            elif "agents" in state:
+                for i, agent in enumerate(self.agents):
+                    if i < len(state["agents"]):
+                        agent.load_state(state["agents"][i])
+            return state.get("episode", 0)
+        else:
+            import json
+            with open(ckpt_path, encoding="utf-8") as f:
+                state = json.load(f)
+            self.global_step = state.get("global_step", 0)
+            for i, agent in enumerate(self.agents):
+                if i < len(state.get("agents", [])):
+                    agent.load_state(state["agents"][i])
+            return state.get("episode", 0)

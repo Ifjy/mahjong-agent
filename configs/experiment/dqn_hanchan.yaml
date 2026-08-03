@@ -4,7 +4,7 @@
 experiment:
   name: "dqn_hanchan"
   seed: 42
-  total_episodes: 200
+  total_episodes: 500
   checkpoint_freq: 50
   log_dir: "runs"
 

@@ -23,7 +23,7 @@ class ParallelCollector:
     """多 env 并行采集器 (单进程)。"""
 
     def __init__(self, env_config: Dict, agent: DQNAgent, num_envs: int = 8,
-                 base_seed: int = 0):
+                 base_seed: int = 0, initial_episodes: int = 0, initial_steps: int = 0):
         self.agent = agent
         self.num_envs = num_envs
         self.envs = [MahjongEnv(env_config) for _ in range(num_envs)]
@@ -34,8 +34,8 @@ class ParallelCollector:
             {i: None for i in range(4)} for _ in range(num_envs)
         ]
         self.accrue = [[0.0] * 4 for _ in range(num_envs)]
-        self.episodes_completed = 0
-        self.total_steps = 0
+        self.episodes_completed = initial_episodes
+        self.total_steps = initial_steps
         # 最近完成局的统计 (供 Trainer 写 metrics)
         self.last_final_scores: List[int] = [0, 0, 0, 0]
         self.last_rewards: Dict[int, float] = {}
