@@ -575,7 +575,7 @@ class GameState:
                 # 暗杠不破坏门清 (is_menzen 保持原样)
 
             elif action.kan_type == KanType.ADDED:
-                # 加杠：从手牌移除 1 张，加到已有的 PON 上
+                # 加杠：从手牌(或drawn_tile)移除 1 张，加到已有的 PON 上
                 target_tile = action.tile
 
                 # 移除
@@ -595,6 +595,9 @@ class GameState:
                         raise RuntimeError(
                             f"apply_action(ADDED_KAN): 无法从手牌移除 {added_tile}"
                         )
+                    # 加杠用手牌的牌时, drawn_tile 仍存在, 必须清除
+                    # (加杠后进入杠流程摸岭上牌, 不保留旧 drawn_tile)
+                    player.drawn_tile = None
 
                 # 更新副露
                 for i, m in enumerate(player.melds):
