@@ -161,9 +161,9 @@ class ActionValidator:
             if action.type == ActionType.RON
         }
         if ron_declarations:
-            # 检查上家 > 对家 > 下家 (逆时针最近)
+            # 头跳: 从打牌者的下家开始顺时针 (下家→对家→上家)
             for i in range(1, num_players):
-                player_idx_check = (discarder_index - i) % num_players
+                player_idx_check = (discarder_index + i) % num_players
                 if player_idx_check in ron_declarations:
                     return ron_declarations[player_idx_check], player_idx_check
 
@@ -174,9 +174,9 @@ class ActionValidator:
             if action.type in {ActionType.PON, ActionType.KAN}
         }
         if pon_kan_declarations:
-            # 检查上家 > 对家 > 下家
+            # 头跳: 下家→对家→上家
             for i in range(1, num_players):
-                player_idx_check = (discarder_index - i) % num_players
+                player_idx_check = (discarder_index + i) % num_players
                 if player_idx_check in pon_kan_declarations:
                     return pon_kan_declarations[player_idx_check], player_idx_check
 

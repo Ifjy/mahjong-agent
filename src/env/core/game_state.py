@@ -600,6 +600,7 @@ class GameState:
                     player.drawn_tile = None
 
                 # 更新副露
+                pon_found = False
                 for i, m in enumerate(player.melds):
                     if (
                         m.type == ActionType.PON
@@ -614,7 +615,12 @@ class GameState:
                             called_tile=m.called_tile,
                         )
                         player.melds[i] = new_meld
+                        pon_found = True
                         break
+                if not pon_found:
+                    raise RuntimeError(
+                        f"apply_action(ADDED_KAN): 未找到 {target_tile} 的 PON 副露"
+                    )
 
             self._clear_ippatsu_for_all()
             # 鸣牌也意味着上一家的“刚立直”状态结束（立直成立）
