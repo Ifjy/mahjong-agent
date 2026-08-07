@@ -45,11 +45,13 @@ class MahjongEnv(gym.Env):
         reward_cfg = self.config.get("reward", {})
         self.reward_mode = reward_cfg.get("mode", "score_delta")
         self.placement_rewards = reward_cfg.get(
-            "placement_rewards", [1.0, 0.3, -0.3, -1.0]
+            "placement_rewards", [1.5, 0.3, -0.3, -1.0]
         )
         self.score_alpha = reward_cfg.get("score_alpha", 0.5)
         self.score_normalize = reward_cfg.get("score_normalize", 10000)
         self.step_penalty = reward_cfg.get("step_penalty", 0.0)
+        # 向听数 shaping: 鼓励手牌质量改善 (势函数式, 不改变最优策略)
+        self.shanten_alpha = reward_cfg.get("shanten_alpha", 0.0)
         self._initial_score = self.config.get("initial_score", 25000)
 
     def reset(self, seed=None, options=None):
@@ -87,12 +89,22 @@ class MahjongEnv(gym.Env):
         # 3. 动作执行前获取分数 (用于 Reward)
         old_score = self.controller.gamestate.players[current_player_idx].score
 
+        # 3b. 动作执行前算向听数 (用于向听数 shaping reward)
+        shanten_before = None
+        if self.shanten_alpha > 0:
+            shanten_before = self._player_shanten(current_player_idx)
+
         # 4. 将动作交给 Controller (Controller 内部维护 current_player_index)
         self.controller.step(current_player_idx, action)
 
         # 5. 计算奖励 (step reward 仅含稠密部分; episode reward 在 info["rewards"])
         state = self.controller.gamestate
-        reward = self._step_reward(state, current_player_idx)
+        try:
+            reward = self._step_reward(state, current_player_idx, current_player_idx,
+                                        shanten_before)
+        except Exception:
+            # shaping 任何异常都不应中断训练 (回退到纯步惩罚)
+            reward = -abs(self.step_penalty)
 
         # 终止判定: _game_over_flag 或 game_phase==GAME_OVER 任一为真 (防御不一致)
         from src.env.core.game_state import GamePhase
@@ -177,9 +189,46 @@ class MahjongEnv(gym.Env):
             return cand_idx
         return None
 
-    def _step_reward(self, state: GameState, player_idx: int) -> float:
-        """单步稠密 reward (默认 0 或步惩罚)。详细 shaping 由 config 控制。"""
-        return -abs(self.step_penalty)
+    def _player_shanten(self, player_idx: int) -> int:
+        """计算玩家当前向听数 (含 drawn_tile)。健壮处理边界。"""
+        try:
+            ha = self.controller.rules_engine.hand_analyzer
+            player = self.controller.gamestate.players[player_idx]
+            # 严格校验: 所有 tile 必须非 None 且有 .value 属性
+            hand = []
+            for t in player.hand:
+                if t is None or not hasattr(t, "value"):
+                    return 8
+                hand.append(t)
+            if player.drawn_tile is not None and hasattr(player.drawn_tile, "value"):
+                hand.append(player.drawn_tile)
+            # melds 校验: 任一副露含 None 则整体跳过向听计算
+            for m in player.melds:
+                for t in m.tiles:
+                    if t is None or not hasattr(t, "value"):
+                        return 8
+            return ha.calculate_shanten(hand, list(player.melds))
+        except Exception:
+            return 8   # 出错时返回最大向听 (惩罚中性, 不影响最优策略)
+
+    def _step_reward(self, state: GameState, player_idx: int,
+                     acting_player: int = -1,
+                     shanten_before: int = None) -> float:
+        """
+        单步稠密 reward。
+        - 步惩罚 (默认 0)
+        - 向听数 shaping (势函数式: alpha * (shanten_before - shanten_after))
+          只对 acting_player 给 (摸牌打牌改善自己手牌时奖励),
+          不改变最优策略 (potential-based shaping)。
+        """
+        r = -abs(self.step_penalty)
+        # 向听数 shaping: 仅当该步是 acting player 的决策 (打牌/摸牌后)
+        if (self.shanten_alpha > 0 and shanten_before is not None
+                and player_idx == acting_player):
+            shanten_after = self._player_shanten(player_idx)
+            # 向听数减少 (手牌变好) → 正奖励; 增加 → 负奖励
+            r += self.shanten_alpha * (shanten_before - shanten_after)
+        return r
 
     def _episode_rewards(self, state: GameState) -> Dict[int, float]:
         """终局时计算 per-player episode reward (顺位/点数/hybrid)。
