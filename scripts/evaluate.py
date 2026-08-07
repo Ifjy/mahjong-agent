@@ -33,11 +33,27 @@ def evaluate(ckpt_path: str, opponent: str, games: int, seat: int = 0):
     """DQN (座位 seat) vs 3 个 opponent。"""
     quiet()
     env = MahjongEnv(get_default_config())
-    # 加载 DQN
+    # 加载 DQN (兼容 train.py 的 agents[] 和 bc_to_rl.py 的 agents[] 格式,
+    # 以及旧版 agent 单字段格式)
     import torch
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    if "agent" in ckpt:
+        agent_state = ckpt["agent"]
+    elif "agents" in ckpt:
+        agent_state = ckpt["agents"][0]
+    elif "model_state_dict" in ckpt:   # BC 原始格式 (bc_best.pt)
+        agent_state = {
+            "initialized": True,
+            "state_dim": ckpt["state_dim"],
+            "action_dim": ckpt["action_dim"],
+            "q_net": ckpt["model_state_dict"],
+            "target_net": ckpt["model_state_dict"],
+            "train_steps": 0,
+        }
+    else:
+        raise ValueError(f"checkpoint {ckpt_path} 格式未知: {list(ckpt.keys())}")
     dqn = DQNAgent({"algo_config": {"device": "cpu", "hidden_dim": 256}, "device": "cpu"}, seat)
-    dqn.load_state(ckpt["agent"])
+    dqn.load_state(agent_state)
     dqn.train_mode = False
 
     # 3 个对手 (用真正的 agent, 不是固定优先级)

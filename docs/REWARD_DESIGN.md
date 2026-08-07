@@ -1,7 +1,37 @@
 # 设计文档 07：奖励信号设计 (REWARD_DESIGN)
 
-> 状态：**草案 v1** ｜ 优先级：**中（阶段3 RL 时落地）** ｜ 关联代码：`src/env/mahjong_env.py(_calculate_reward)`
-> 本文定义 RL 训练用的奖励函数。当前 Env 的 reward 是临时实现（点数差/步惩罚），本文是正式设计。
+> 状态：**已落地** ｜ 关联代码：`src/env/mahjong_env.py(_step_reward / _episode_rewards)`
+> 当前默认配置：**placement 模式**（纯顺位，零和）。
+
+---
+
+## 0. 实际实现（已落地，2026-08）
+
+reward 由两层组成，全部在 `MahjongEnv` 实现：
+
+### 每步稠密 reward（`step()` 返回值）
+```python
+def _step_reward(self, state, player_idx):
+    return -abs(self.step_penalty)   # 默认 step_penalty=0.0 → 每步 reward=0
+```
+默认配置下中间步 reward 全 0，只有终局有非零 reward。
+
+### 终局 episode reward（`info["rewards"]`，半庄结束时算）
+支持 3 种模式，由 `config.reward.mode` 决定。**当前所有 config 用 `placement`**：
+
+| 模式 | 公式 | 说明 |
+|------|------|------|
+| `placement` (默认) | `placement_rewards[rank]`，rank 按点数降序 | 纯顺位，零和 |
+| `score_delta` | `(score-初始)/10000 - mean` | 点数差，零和归一化 |
+| `hybrid` | `placement_r + score_alpha * (score_r - mean)` | 顺位+点数加权 |
+
+**placement 默认值**：`[1.0, 0.3, -0.3, -1.0]`（1名/2名/3名/4名），零和。
+
+### reward 如何分配到 transition（`ParallelCollector.accrue`）
+奖励不每步立即给，而是累积到该玩家下次决策时才入 buffer：
+- 每步 `accrue[player] += step_reward`（默认 0）
+- 终局时 `final_r = accrue[p] + episode_rewards[p]`，回填到每个玩家的最后一个 pending transition
+- 实际效果：默认配置下 transition reward 几乎全 0，只有半庄结束时的最后一个动作带非零 episode reward
 
 ---
 

@@ -33,9 +33,9 @@ algo_config:
   buffer_size: 100000
   batch_size: 128
   target_update_freq: 500
-  epsilon_start: 1.0
-  epsilon_end: 0.1
-  epsilon_decay_steps: 200
+  epsilon_start: 0.1      # BC 微调用低探索起点 (避免随机动作冲掉预训练策略)
+  epsilon_end: 0.05
+  epsilon_decay_steps: 50000
 
 agents: # 4 个 DQN self-play
   - "dqn"
@@ -44,6 +44,6 @@ agents: # 4 个 DQN self-play
   - "dqn"
 
 reward:
-  mode: "score_delta"
-  score_normalize: 10000
+  mode: "placement"
+  placement_rewards: [1.0, 0.3, -0.3, -1.0]   # 半庄结束按点数排名, 零和
   step_penalty: 0.0
